@@ -1,0 +1,25 @@
+# Electron build files
+release/
+dist/
+out/
+build/
+
+# Dependencies
+node_modules/
+
+# Cache
+.eslintcache
+.cache/
+
+# Logs
+*.log
+*.log*
+
+# System
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example

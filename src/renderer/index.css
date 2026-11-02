@@ -1,0 +1,23 @@
+/* Sidebar custom scrollbar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(247, 243, 234, 0.15);
+  border-radius: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(247, 243, 234, 0.3);
+}
+
+/* Sidebar ke andar scroll smooth */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(247, 243, 234, 0.15) transparent;
+}
