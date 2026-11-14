@@ -3,15 +3,32 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  productService,
+  type Product as DbProduct,
+} from '@renderer/services/productService';
+import { vendorsService, type Vendor } from '@renderer/services/vendorsservice';
+import {
+  orderService,
+  OrderServiceError,
+  type PurchaseOrder as Order,
+  type PurchasePayment as PaymentRecord,
+  type StatusHistoryEntry as StatusHistory,
+  type MeasuringUnit,
+  type OrderStatus,
+  type PaymentMethod,
+  type PaymentStatus,
+} from '@renderer/services/orderservice';
 
 // ============================================================
-// THEME COLORS
+// THEME COLORS (from the shared theme file)
 // ============================================================
-const IVORY = '#F7F3EA';
-const FOREST = '#123C32';
-const OLIVE = '#66745A';
-const CHARCOAL = '#252A28';
-const BRASS = '#C49A5A';
+const IVORY = THEME.warmIvory;
+const FOREST = THEME.deepForest;
+const OLIVE = THEME.mutedOlive;
+const CHARCOAL = THEME.charcoal;
+const BRASS = THEME.warmBrass;
 const WHITE = '#FFFFFF';
 
 const FALLBACK_UNIT = 'piece';
@@ -90,7 +107,7 @@ const t = {
     errQty: 'Quantity must be a whole number greater than 0',
     errSelectVendor: 'Select a vendor',
     errDate: 'Order date is required',
-    errStorage: 'Could not save — storage may be full.',
+    errStorage: 'Could not save — please try again.',
     orderLabel: 'Order',
     orderNo: 'Order No:',
     date: 'Date:',
@@ -116,8 +133,8 @@ const t = {
     toastCancelled: (no: string) => `${no} cancelled`,
     errOnlyPendingReceive: 'Only Pending orders can be marked as received.',
     errOnlyPendingCancel: 'Only Pending orders can be cancelled.',
-    errStockUpdate: 'Could not update stock — storage may be full.',
-    errOrderUpdate: 'Could not update order — storage may be full.',
+    errStockUpdate: 'Could not update stock — please try again.',
+    errOrderUpdate: 'Could not update order — please try again.',
     histOrderPlaced: 'Order placed',
     histGoodsReceived: 'Goods received',
     histCancelled: 'Cancelled',
@@ -130,7 +147,7 @@ const t = {
     of: 'of',
     actView: 'View',
     actWhatsApp: 'Send on WhatsApp',
-    // ---- NEW: payments / supplier payable ----
+    // ---- payments / supplier payable ----
     paymentLabel: 'Payment',
     allPayments: 'All Payments',
     payDue: 'Has balance due',
@@ -161,15 +178,15 @@ const t = {
     errAmountTooHigh: 'Amount cannot exceed the balance due',
     errAdvanceInvalid: 'Amount must be between 0 and the order total',
     toastPaymentAdded: 'Payment added successfully',
-    errPaymentSave: 'Could not save payment — storage may be full.',
-    toastAccErr: 'Could not create accounting entry.',
+    errPaymentSave: 'Could not save payment — please try again.',
+    toastAccErr: 'Could not create accounting entry. Nothing was saved — please try again.',
     advanceTitle: 'Advance Payment (optional)',
     advanceHint: 'Amount paid to the vendor now. Leave empty to pay later.',
     legacyPaid: 'Marked as paid before payment tracking was added',
     receiveDueNote: (bal: string) =>
       `A balance of ${bal} will remain in Supplier Payable.`,
     errCancelHasPayments: 'This order has payments and cannot be cancelled.',
-    // ---- NEW: print slip ----
+    // ---- print slip ----
     actPrint: 'Print Slip',
     slipTitle: 'PURCHASE ORDER',
     slipSignature: 'Received by',
@@ -178,7 +195,7 @@ const t = {
     toastPopupBlocked: 'Printing is blocked — allow pop-ups and try again',
     waPaid: 'Paid',
     waBalance: 'Balance',
-    // ---- NEW: quick add product ----
+    // ---- quick add product ----
     addNewProduct: 'Add new product',
     addProductTitle: 'Add Product',
     addProductSubtitle: (sku: string) => `SKU: ${sku} (auto-generated)`,
@@ -214,6 +231,12 @@ const t = {
     vendorSection: 'Vendor Details',
     orderSection: 'Order Details',
     summarySection: 'Amounts',
+    // ---- backend ----
+    errNoUnits: 'No measuring units found — add one in Settings first.',
+    errLoad: 'Could not load data. Check your connection and try again.',
+    errGeneric: 'Something went wrong. Please try again.',
+    errOrderChanged: 'This order was changed by someone else. Data was refreshed — please try again.',
+    loading: 'Loading...',
   },
   ar: {
     pageTitle: 'المخزون — الطلبات',
@@ -283,7 +306,7 @@ const t = {
     errQty: 'يجب أن تكون الكمية عدداً صحيحاً أكبر من 0',
     errSelectVendor: 'اختر مورداً',
     errDate: 'تاريخ الطلب مطلوب',
-    errStorage: 'تعذر الحفظ — قد تكون مساحة التخزين ممتلئة.',
+    errStorage: 'تعذر الحفظ — حاول مرة أخرى.',
     orderLabel: 'الطلب',
     orderNo: 'رقم الطلب:',
     date: 'التاريخ:',
@@ -309,8 +332,8 @@ const t = {
     toastCancelled: (no: string) => `${no} تم إلغاؤه`,
     errOnlyPendingReceive: 'يمكن وضع الطلبات المعلقة فقط كمستلمة.',
     errOnlyPendingCancel: 'يمكن إلغاء الطلبات المعلقة فقط.',
-    errStockUpdate: 'تعذر تحديث المخزون — قد تكون مساحة التخزين ممتلئة.',
-    errOrderUpdate: 'تعذر تحديث الطلب — قد تكون مساحة التخزين ممتلئة.',
+    errStockUpdate: 'تعذر تحديث المخزون — حاول مرة أخرى.',
+    errOrderUpdate: 'تعذر تحديث الطلب — حاول مرة أخرى.',
     histOrderPlaced: 'تم تقديم الطلب',
     histGoodsReceived: 'تم استلام البضائع',
     histCancelled: 'ملغى',
@@ -353,8 +376,8 @@ const t = {
     errAmountTooHigh: 'المبلغ لا يمكن أن يتجاوز الرصيد المستحق',
     errAdvanceInvalid: 'يجب أن يكون المبلغ بين 0 وإجمالي الطلب',
     toastPaymentAdded: 'تمت إضافة الدفعة بنجاح',
-    errPaymentSave: 'تعذر حفظ الدفعة — قد تكون مساحة التخزين ممتلئة.',
-    toastAccErr: 'تعذر إنشاء القيد المحاسبي.',
+    errPaymentSave: 'تعذر حفظ الدفعة — حاول مرة أخرى.',
+    toastAccErr: 'تعذر إنشاء القيد المحاسبي. لم يتم حفظ شيء — حاول مرة أخرى.',
     advanceTitle: 'دفعة مقدمة (اختياري)',
     advanceHint: 'المبلغ المدفوع للمورد الآن. اتركه فارغاً للدفع لاحقاً.',
     legacyPaid: 'تم تحديده كمدفوع قبل إضافة تتبع المدفوعات',
@@ -403,6 +426,11 @@ const t = {
     vendorSection: 'بيانات المورد',
     orderSection: 'بيانات الطلب',
     summarySection: 'المبالغ',
+    errNoUnits: 'لا توجد وحدات قياس — أضف واحدة من الإعدادات أولاً.',
+    errLoad: 'تعذر تحميل البيانات. تحقق من الاتصال وحاول مجدداً.',
+    errGeneric: 'حدث خطأ ما. حاول مرة أخرى.',
+    errOrderChanged: 'تم تعديل هذا الطلب من قبل شخص آخر. تم تحديث البيانات — حاول مجدداً.',
+    loading: 'جارٍ التحميل...',
   },
   ur: {
     pageTitle: 'انوینٹری — آرڈرز',
@@ -472,7 +500,7 @@ const t = {
     errQty: 'مقدار 0 سے زیادہ مکمل عدد ہونی چاہیے',
     errSelectVendor: 'وینڈر منتخب کریں',
     errDate: 'آرڈر کی تاریخ لازمی ہے',
-    errStorage: 'محفوظ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errStorage: 'محفوظ نہیں ہو سکا — دوبارہ کوشش کریں۔',
     orderLabel: 'آرڈر',
     orderNo: 'آرڈر نمبر:',
     date: 'تاریخ:',
@@ -498,8 +526,8 @@ const t = {
     toastCancelled: (no: string) => `${no} منسوخ ہو گیا`,
     errOnlyPendingReceive: 'صرف زیر التواء آرڈرز کو موصول کے طور پر نشان زد کیا جا سکتا ہے۔',
     errOnlyPendingCancel: 'صرف زیر التواء آرڈرز منسوخ کیے جا سکتے ہیں۔',
-    errStockUpdate: 'اسٹاک اپ ڈیٹ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
-    errOrderUpdate: 'آرڈر اپ ڈیٹ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errStockUpdate: 'اسٹاک اپ ڈیٹ نہیں ہو سکا — دوبارہ کوشش کریں۔',
+    errOrderUpdate: 'آرڈر اپ ڈیٹ نہیں ہو سکا — دوبارہ کوشش کریں۔',
     histOrderPlaced: 'آرڈر دیا گیا',
     histGoodsReceived: 'سامان موصول ہوا',
     histCancelled: 'منسوخ',
@@ -542,8 +570,8 @@ const t = {
     errAmountTooHigh: 'رقم باقی رقم سے زیادہ نہیں ہو سکتی',
     errAdvanceInvalid: 'رقم 0 اور آرڈر کی کل رقم کے درمیان ہونی چاہیے',
     toastPaymentAdded: 'ادائیگی کامیابی سے شامل ہو گئی',
-    errPaymentSave: 'ادائیگی محفوظ نہیں ہو سکی — اسٹوریج بھری ہو سکتی ہے۔',
-    toastAccErr: 'اکاؤنٹنگ اندراج نہیں بن سکا۔',
+    errPaymentSave: 'ادائیگی محفوظ نہیں ہو سکی — دوبارہ کوشش کریں۔',
+    toastAccErr: 'اکاؤنٹنگ اندراج نہیں بن سکا۔ کچھ محفوظ نہیں ہوا — دوبارہ کوشش کریں۔',
     advanceTitle: 'پیشگی ادائیگی (اختیاری)',
     advanceHint: 'وینڈر کو ابھی ادا کی گئی رقم۔ بعد میں ادا کرنے کے لیے خالی چھوڑیں۔',
     legacyPaid: 'ادائیگی ٹریکنگ شامل ہونے سے پہلے ادا شدہ نشان زد',
@@ -592,6 +620,11 @@ const t = {
     vendorSection: 'وینڈر کی تفصیلات',
     orderSection: 'آرڈر کی تفصیلات',
     summarySection: 'رقوم',
+    errNoUnits: 'کوئی پیمائش کا یونٹ نہیں ملا — پہلے سیٹنگز میں شامل کریں۔',
+    errLoad: 'ڈیٹا لوڈ نہیں ہو سکا۔ کنکشن چیک کر کے دوبارہ کوشش کریں۔',
+    errGeneric: 'کچھ غلط ہو گیا۔ دوبارہ کوشش کریں۔',
+    errOrderChanged: 'یہ آرڈر کسی اور نے تبدیل کر دیا۔ ڈیٹا اپ ڈیٹ ہو گیا — دوبارہ کوشش کریں۔',
+    loading: 'لوڈ ہو رہا ہے...',
   },
   hi: {
     pageTitle: 'इन्वेंट्री — ऑर्डर',
@@ -661,7 +694,7 @@ const t = {
     errQty: 'मात्रा 0 से अधिक पूर्ण संख्या होनी चाहिए',
     errSelectVendor: 'विक्रेता चुनें',
     errDate: 'ऑर्डर तारीख़ आवश्यक है',
-    errStorage: 'सहेजा नहीं जा सका — स्टोरेज भरा हो सकता है।',
+    errStorage: 'सहेजा नहीं जा सका — फिर कोशिश करें।',
     orderLabel: 'ऑर्डर',
     orderNo: 'ऑर्डर नंबर:',
     date: 'तारीख़:',
@@ -687,8 +720,8 @@ const t = {
     toastCancelled: (no: string) => `${no} रद्द किया गया`,
     errOnlyPendingReceive: 'केवल लंबित ऑर्डर ही प्राप्त के रूप में चिह्नित किए जा सकते हैं।',
     errOnlyPendingCancel: 'केवल लंबित ऑर्डर ही रद्द किए जा सकते हैं।',
-    errStockUpdate: 'स्टॉक अपडेट नहीं हो सका — स्टोरेज भरा हो सकता है।',
-    errOrderUpdate: 'ऑर्डर अपडेट नहीं हो सका — स्टोरेज भरा हो सकता है।',
+    errStockUpdate: 'स्टॉक अपडेट नहीं हो सका — फिर कोशिश करें।',
+    errOrderUpdate: 'ऑर्डर अपडेट नहीं हो सका — फिर कोशिश करें।',
     histOrderPlaced: 'ऑर्डर दिया गया',
     histGoodsReceived: 'माल प्राप्त हुआ',
     histCancelled: 'रद्द',
@@ -731,8 +764,8 @@ const t = {
     errAmountTooHigh: 'राशि बाकी राशि से अधिक नहीं हो सकती',
     errAdvanceInvalid: 'राशि 0 और ऑर्डर कुल के बीच होनी चाहिए',
     toastPaymentAdded: 'भुगतान सफलतापूर्वक जोड़ा गया',
-    errPaymentSave: 'भुगतान सहेजा नहीं जा सका — स्टोरेज भरा हो सकता है।',
-    toastAccErr: 'लेखांकन प्रविष्टि नहीं बन सकी।',
+    errPaymentSave: 'भुगतान सहेजा नहीं जा सका — फिर कोशिश करें।',
+    toastAccErr: 'लेखांकन प्रविष्टि नहीं बन सकी। कुछ सहेजा नहीं गया — फिर कोशिश करें।',
     advanceTitle: 'अग्रिम भुगतान (वैकल्पिक)',
     advanceHint: 'विक्रेता को अभी दी गई राशि। बाद में भुगतान के लिए खाली छोड़ें।',
     legacyPaid: 'भुगतान ट्रैकिंग जुड़ने से पहले भुगतान हुआ चिह्नित',
@@ -781,6 +814,11 @@ const t = {
     vendorSection: 'विक्रेता विवरण',
     orderSection: 'ऑर्डर विवरण',
     summarySection: 'राशियाँ',
+    errNoUnits: 'कोई मापन इकाई नहीं मिली — पहले सेटिंग्स में जोड़ें।',
+    errLoad: 'डेटा लोड नहीं हो सका। कनेक्शन जाँचकर फिर कोशिश करें।',
+    errGeneric: 'कुछ गलत हो गया। फिर कोशिश करें।',
+    errOrderChanged: 'यह ऑर्डर किसी और ने बदल दिया। डेटा रीफ़्रेश हो गया — फिर कोशिश करें।',
+    loading: 'लोड हो रहा है...',
   },
 } as const;
 
@@ -793,74 +831,8 @@ type Translations = {
 };
 
 // ============================================================
-// ACCOUNTING (payments to vendors = 'Out' entries)
+// TYPES (Order / PaymentRecord / StatusHistory come from orderService)
 // ============================================================
-type AccountingType = 'In' | 'Out' | 'Return';
-type AccountingMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
-
-type AccountingTransaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  invoiceFile?: string;
-  invoiceFileName?: string;
-  type: AccountingType;
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: AccountingMode;
-  linkedInvoiceId?: string;
-  sourceDocumentId?: string;
-  sourceModule?: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-  createdAt: string;
-};
-
-const TRANSACTIONS_KEY = 'zakhira_transactions';
-
-const loadAccountingList = (): AccountingTransaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveAccountingList = (list: AccountingTransaction[]): boolean => {
-  try {
-    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const genAccountingTxnNo = (existing: AccountingTransaction[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `TXN-${year}-`;
-  const numbers = existing
-    .filter((x) => x.transactionNo.startsWith(prefix))
-    .map((x) => Number(x.transactionNo.split('-')[2]))
-    .filter((n) => !Number.isNaN(n));
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-};
-
-const accUid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-// ============================================================
-// TYPES
-// ============================================================
-type OrderStatus = 'Pending' | 'Received' | 'Cancelled';
-type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Card' | 'Other';
-type PaymentStatus = 'Unpaid' | 'Partially Paid' | 'Paid';
-
 type Product = {
   id: string;
   sku: string;
@@ -868,82 +840,9 @@ type Product = {
   stock: number;
   lowStockLevel: number;
   active: boolean;
-  price?: number;
-  unit?: string;
-  description?: string;
-  images?: string[];
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-type Vendor = {
-  id: string;
-  uniqueId: string;
-  name: string;
-  companyName: string;
-  phone: string;
-  vatNumber: string;
-  address: string;
-  city: string;
-  active: boolean;
-};
-
-type OrderItem = {
-  id: string;
-  productId: string;
-  sku: string;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  lineTotal: number;
-  unit: string;
-};
-
-type PaymentRecord = {
-  id: string;
-  date: string;
-  amount: number;
-  method: PaymentMethod;
-  note?: string;
-  balanceAfter: number;
-  recordedBy: string;
-  createdAt: string;
-};
-
-type Order = {
-  id: string;
-  orderNumber: string;
-  vendorId: string;
-  vendor: {
-    uniqueId: string;
-    name: string;
-    companyName: string;
-    phone: string;
-    vatNumber: string;
-    address: string;
-    city: string;
-  };
-  orderDate: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  totalAmount: number;
-  // ✅ payment tracking (same idea as sales records)
-  paymentStatus: PaymentStatus;
-  paymentAmount: number;
-  balanceDue: number;
-  payments: PaymentRecord[];
-  createdBy: string;
-  createdAt: string;
-};
-
-type StatusHistory = {
-  id: string;
-  orderId: string;
-  oldStatus: OrderStatus | null;
-  newStatus: OrderStatus;
-  reason: string;
-  changedBy: string;
-  changedAt: string;
+  price: number;
+  unit: string; // unit label (display)
+  unitId: string;
 };
 
 // ============================================================
@@ -1070,10 +969,8 @@ const Icons = {
 // ============================================================
 // CONSTANTS
 // ============================================================
-const PRODUCTS_KEY = 'zakhira_inventory_products';
-const VENDORS_KEY = 'zakhira_inventory_vendors';
-const ORDERS_KEY = 'zakhira_inventory_orders';
-const HISTORY_KEY = 'zakhira_inventory_status_history';
+// Same key the Products page uses (backend has no images column yet)
+const IMAGES_KEY = 'zakhira_product_images';
 const ORDERS_FILTER_HANDOFF = 'zakhira_inventory_orders_filter';
 
 const PAGE_SIZE = 10;
@@ -1102,8 +999,12 @@ const formatMoney = (n: number): string => {
   return `${n < 0 ? '-' : ''}${abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 };
 
+// Date-only strings (YYYY-MM-DD from the DB) are formatted without
+// timezone conversion, so the day can never shift.
 const formatDate = (iso: string): string => {
   if (!iso) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -1120,18 +1021,7 @@ const phoneDigits = (raw: string): string => raw.replace(/\D/g, '');
 
 const isWholeNumber = (s: string): boolean => /^\d+$/.test(s.trim());
 
-const generateOrderNo = (existing: Order[]): string => {
-  const numbers = existing
-    .map((o) => {
-      const m = o.orderNumber.match(/ORD-(\d+)/);
-      return m ? parseInt(m[1], 10) : 0;
-    })
-    .filter((n) => n > 0);
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `ORD-${String(max + 1).padStart(4, '0')}`;
-};
-
-const generateSKU = (existing: Product[]): string => {
+const generateSKU = (existing: { sku?: string }[]): string => {
   const numbers = existing
     .map((p) => {
       const m = (p.sku || '').match(/SKU-(\d+)/);
@@ -1146,17 +1036,9 @@ const unitShort = (unitName?: string): string => {
   return (unitName || FALLBACK_UNIT).trim();
 };
 
-const getCurrentUser = (): { id: string; name: string } => {
-  try {
-    const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
-    return {
-      id: u.id || u._id || u.email || '',
-      name: u.name || u.fullName || u.username || u.email || 'User',
-    };
-  } catch {
-    return { id: '', name: 'User' };
-  }
-};
+const errMsg = (e: unknown, fallback: string): string =>
+  (e as { message?: string })?.message || fallback;
+
 
 const getCompanyInfo = () => {
   try {
@@ -1206,154 +1088,57 @@ const payBadgeStyle = (s: PaymentStatus): React.CSSProperties =>
 /** Payments are allowed on Pending (advance) and Received orders while a balance remains. */
 const canPay = (o: Order): boolean => o.status !== 'Cancelled' && o.balanceDue > 0;
 
-/** Old orders (saved before payment tracking) get safe defaults. */
-const normalizeOrder = (o: Partial<Order>): Order => {
-  const total = Number(o.totalAmount) || 0;
-  const payments = Array.isArray(o.payments) ? o.payments : [];
-  let paymentAmount: number;
-  let balanceDue: number;
-  let paymentStatus: PaymentStatus;
-
-  if (o.paymentStatus !== undefined) {
-    paymentAmount = Number(o.paymentAmount) || 0;
-    balanceDue =
-      typeof o.balanceDue === 'number'
-        ? o.balanceDue
-        : roundMoney(Math.max(0, total - paymentAmount));
-    paymentStatus = o.paymentStatus;
-  } else if (o.status === 'Received') {
-    // Legacy: receiving used to book the full amount as paid
-    paymentAmount = total;
-    balanceDue = 0;
-    paymentStatus = 'Paid';
-  } else {
-    paymentAmount = 0;
-    balanceDue = total;
-    paymentStatus = 'Unpaid';
+/** Translates a service error into a message for the user. */
+const describeError = (
+  e: unknown,
+  tr: Translations,
+  ctx: 'place' | 'receive' | 'cancel' | 'pay' | 'product'
+): string => {
+  if (e instanceof OrderServiceError) {
+    switch (e.code) {
+      case 'NOT_PENDING':
+        return ctx === 'cancel' ? tr.errOnlyPendingCancel : tr.errOnlyPendingReceive;
+      case 'HAS_PAYMENTS':
+        return tr.errCancelHasPayments;
+      case 'AMOUNT_TOO_HIGH':
+        return tr.errAmountTooHigh;
+      case 'NOT_PAYABLE':
+      case 'CHANGED':
+        return tr.errOrderChanged;
+      case 'ACCOUNTING':
+        return tr.toastAccErr;
+      default:
+        return e.message || tr.errGeneric;
+    }
   }
+  return errMsg(e, tr.errGeneric);
+};
 
+// ---------- DB → UI ----------
+const toUiProduct = (p: DbProduct, units: MeasuringUnit[]): Product => {
+  const u = units.find((x) => x.id === p.unit_id);
   return {
-    ...(o as Order),
-    items: Array.isArray(o.items)
-      ? o.items.map((it: Partial<OrderItem>) => ({
-          ...(it as OrderItem),
-          unit: (it.unit as string) || FALLBACK_UNIT,
-        }))
-      : [],
-    totalAmount: total,
-    paymentStatus,
-    paymentAmount,
-    balanceDue,
-    payments,
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    stock: Number(p.stock) || 0,
+    lowStockLevel: Number(p.low_stock_level) || 0,
+    active: !!p.active,
+    price: Number(p.price) || 0,
+    unit: u ? u.label || u.name : FALLBACK_UNIT,
+    unitId: p.unit_id,
   };
 };
 
-// ============================================================
-// STORAGE
-// ============================================================
-const loadOrders = (): Order[] => {
+// images live in localStorage (same map the Products page uses)
+const saveProductImages = (id: string, imgs: string[]): void => {
   try {
-    const raw = localStorage.getItem(ORDERS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((o: Partial<Order>) => normalizeOrder(o));
+    const map = JSON.parse(localStorage.getItem(IMAGES_KEY) || '{}');
+    map[id] = imgs;
+    localStorage.setItem(IMAGES_KEY, JSON.stringify(map));
   } catch {
-    return [];
+    /* ignore */
   }
-};
-
-const saveOrders = (list: Order[]): boolean => {
-  try {
-    localStorage.setItem(ORDERS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const loadProducts = (): Product[] => {
-  try {
-    const raw = localStorage.getItem(PRODUCTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((p: Partial<Product>) => ({
-      ...p,
-      unit: (p.unit as string) || FALLBACK_UNIT,
-    })) as Product[];
-  } catch {
-    return [];
-  }
-};
-
-const saveProducts = (list: Product[]): boolean => {
-  try {
-    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const loadVendors = (): Vendor[] => {
-  try {
-    const raw = localStorage.getItem(VENDORS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const loadHistory = (): StatusHistory[] => {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveHistory = (list: StatusHistory[]): boolean => {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** Every vendor payment creates one 'Out' accounting entry linked to the order. */
-const createOrderPaymentEntry = (
-  order: Order,
-  payment: PaymentRecord
-): AccountingTransaction | null => {
-  const existing = loadAccountingList();
-  const txn: AccountingTransaction = {
-    id: accUid('txn'),
-    transactionNo: genAccountingTxnNo(existing),
-    date: payment.date,
-    customerName: order.vendor.name,
-    companyName: order.vendor.companyName,
-    invoiceRef: order.orderNumber,
-    type: 'Out',
-    amount: payment.amount,
-    status: payment.balanceAfter > 0 ? 'Partially Paid' : 'Paid',
-    mode: payment.method,
-    sourceDocumentId: `${order.id}-pay-${payment.id}`,
-    sourceModule: 'inventory',
-    linkedInvoiceId: order.id,
-    notes: `Payment made for Purchase Order ${order.orderNumber} (Balance after: ${payment.balanceAfter})${
-      payment.note ? ` — ${payment.note}` : ''
-    }`,
-    createdAt: new Date().toISOString(),
-  };
-  if (!saveAccountingList([txn, ...existing])) return null;
-  return txn;
 };
 
 // Resize + compress image so localStorage doesn't fill up
@@ -1704,6 +1489,7 @@ function ConfirmModal({
   confirmLabel,
   cancelLabel,
   danger = false,
+  busy = false,
   reasonLabel,
   onConfirm,
   onCancel,
@@ -1713,6 +1499,7 @@ function ConfirmModal({
   confirmLabel: string;
   cancelLabel: string;
   danger?: boolean;
+  busy?: boolean;
   reasonLabel?: string;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
@@ -1738,12 +1525,18 @@ function ConfirmModal({
         </div>
       )}
       <div className="flex gap-2">
-        <button onClick={onCancel} className={`${ghostBtn} flex-1`} style={ghostStyle}>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className={`${ghostBtn} flex-1 disabled:opacity-40 disabled:cursor-not-allowed`}
+          style={ghostStyle}
+        >
           {cancelLabel}
         </button>
         <button
           onClick={() => onConfirm(reason)}
-          className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition"
+          disabled={busy}
+          className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ backgroundColor: danger ? CHARCOAL : BRASS, color: WHITE }}
         >
           {confirmLabel}
@@ -1978,14 +1771,21 @@ function AddPaymentModal({
   order: Order;
   tr: Translations;
   onClose: () => void;
-  onSave: (data: { amount: number; method: PaymentMethod; note?: string }) => void;
+  /** returns an error message to show inside the modal, or null when saved */
+  onSave: (data: {
+    amount: number;
+    method: PaymentMethod;
+    note?: string;
+  }) => Promise<string | null>;
 }): React.JSX.Element {
   const [amount, setAmount] = useState<number | ''>(order.balanceDue);
   const [method, setMethod] = useState<PaymentMethod>('Cash');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (busy) return;
     const amt = amount === '' ? 0 : Number(amount);
     if (Number.isNaN(amt) || amt <= 0) {
       setErr(tr.errAmountRequired);
@@ -1995,7 +1795,10 @@ function AddPaymentModal({
       setErr(tr.errAmountTooHigh);
       return;
     }
-    onSave({ amount: roundMoney(amt), method, note: note.trim() || undefined });
+    setBusy(true);
+    const res = await onSave({ amount: roundMoney(amt), method, note: note.trim() || undefined });
+    setBusy(false);
+    if (res) setErr(res);
   };
 
   const payingNow = Math.min(order.balanceDue, amount === '' ? 0 : Number(amount) || 0);
@@ -2080,11 +1883,17 @@ function AddPaymentModal({
         )}
 
         <div className="flex gap-2 pt-3 border-t" style={{ borderColor: `${OLIVE}1a` }}>
-          <button onClick={onClose} className={`${ghostBtn} flex-1`} style={ghostStyle}>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className={`${ghostBtn} flex-1 disabled:opacity-40 disabled:cursor-not-allowed`}
+            style={ghostStyle}
+          >
             {tr.cancel}
           </button>
           <button
-            onClick={submit}
+            onClick={() => void submit()}
+            disabled={busy}
             className={`${primaryBtn} flex-1`}
             style={{ backgroundColor: BRASS, color: WHITE }}
           >
@@ -2099,25 +1908,33 @@ function AddPaymentModal({
 
 // ============================================================
 // QUICK ADD PRODUCT MODAL (like "Add Customer" on the Sales page)
+// Saves straight to the backend through productService.
 // ============================================================
 function QuickProductModal({
   tr,
+  units,
+  knownProducts,
   onClose,
   onSaved,
 }: {
   tr: Translations;
+  units: MeasuringUnit[];
+  knownProducts: Product[];
   onClose: () => void;
   onSaved: (p: Product) => void;
 }): React.JSX.Element {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
-  const [unit, setUnit] = useState(FALLBACK_UNIT);
+  const [unitId, setUnitId] = useState<string>(
+    () => units.find((u) => u.isDefault)?.id || units[0]?.id || ''
+  );
   const [stock, setStock] = useState('0');
   const [description, setDescription] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [nextSKU] = useState(() => generateSKU(loadProducts()));
+  const [saving, setSaving] = useState(false);
+  const nextSKU = useMemo(() => generateSKU(knownProducts), [knownProducts]);
 
   const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = e.target.files;
@@ -2143,34 +1960,43 @@ function QuickProductModal({
     }
   };
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     const cleanName = name.trim();
     if (!cleanName) return setError(tr.errProductName);
     if (!price || Number(price) <= 0) return setError(tr.errProductPrice);
     if (stock === '' || !isWholeNumber(stock)) return setError(tr.errProductStock);
+    if (!unitId) return setError(tr.errNoUnits);
 
-    const list = loadProducts();
-    if (list.some((p) => p.name.trim().toLowerCase() === cleanName.toLowerCase())) {
-      return setError(tr.errProductDuplicate(cleanName));
+    setSaving(true);
+    setError('');
+    try {
+      // fresh list from the backend: duplicate-name check + next free SKU
+      const fresh = await productService.getProducts();
+      if (fresh.some((p) => p.name.trim().toLowerCase() === cleanName.toLowerCase())) {
+        setError(tr.errProductDuplicate(cleanName));
+        setSaving(false);
+        return;
+      }
+
+      const created = (await productService.createProduct({
+        sku: generateSKU(fresh),
+        name: cleanName,
+        description: description.trim(),
+        price: roundMoney(Number(price)),
+        cost_price: 0,
+        stock: Number(stock),
+        low_stock_level: DEFAULT_LOW_STOCK,
+        unit_id: unitId,
+        category_id: null,
+      })) as DbProduct;
+
+      if (images.length > 0) saveProductImages(created.id, images);
+      onSaved(toUiProduct(created, units));
+    } catch (e) {
+      setError(describeError(e, tr, 'product'));
+      setSaving(false);
     }
-
-    const now = new Date().toISOString();
-    const created: Product = {
-      id: uid('prd'),
-      sku: generateSKU(list),
-      name: cleanName,
-      description: description.trim(),
-      price: roundMoney(Number(price)),
-      stock: Number(stock),
-      lowStockLevel: DEFAULT_LOW_STOCK,
-      images,
-      active: true,
-      createdAt: now,
-      updatedAt: now,
-      unit: unit.trim() || FALLBACK_UNIT,
-    };
-    if (!saveProducts([created, ...list])) return setError(tr.errStorage);
-    onSaved(created);
   };
 
   return (
@@ -2219,14 +2045,27 @@ function QuickProductModal({
           </div>
           <div>
             <label className={labelCls} style={{ color: CHARCOAL }}>
-              {tr.unit}
+              {tr.unit} <span style={{ color: BRASS }}>*</span>
             </label>
-            <input
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              className={inputCls}
+            <select
+              value={unitId}
+              onChange={(e) => {
+                setUnitId(e.target.value);
+                setError('');
+              }}
+              className={`${inputCls} cursor-pointer`}
               style={fieldStyle}
-            />
+            >
+              {units.length === 0 ? (
+                <option value="">—</option>
+              ) : (
+                units.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.label}
+                  </option>
+                ))
+              )}
+            </select>
           </div>
           <div>
             <label className={labelCls} style={{ color: CHARCOAL }}>
@@ -2319,8 +2158,8 @@ function QuickProductModal({
 
         <div className="flex gap-2.5 pt-3 border-t" style={{ borderColor: `${OLIVE}1a` }}>
           <button
-            onClick={submit}
-            disabled={uploading}
+            onClick={() => void submit()}
+            disabled={uploading || saving}
             className={primaryBtn}
             style={{ backgroundColor: BRASS, color: WHITE }}
           >
@@ -2469,26 +2308,31 @@ function PaymentBadge({
 type OrderLine = { key: string; productId: string; quantity: string };
 
 function PlaceOrderModal({
+  products: initialProducts,
+  vendors,
+  units,
+  onProductCreated,
   onClose,
   onSaved,
   tr,
   language,
 }: {
+  products: Product[];
+  vendors: Vendor[];
+  units: MeasuringUnit[];
+  onProductCreated: (p: Product) => void;
   onClose: () => void;
-  onSaved: (accountingOk: boolean) => void;
+  onSaved: (o: Order) => void;
   tr: Translations;
   language: Language;
 }): React.JSX.Element {
-  const [products, setProducts] = useState<Product[]>(() =>
-    loadProducts().filter((p) => p.active)
-  );
-  const [vendors] = useState(() => loadVendors().filter((v) => v.active));
+  const [products, setProducts] = useState<Product[]>(initialProducts);
   const [vendorId, setVendorId] = useState('');
   const [orderDate, setOrderDate] = useState(todayISO());
   const [lines, setLines] = useState<OrderLine[]>(() => [
     { key: uid('ln'), productId: '', quantity: '1' },
   ]);
-  const [orderNo] = useState(() => generateOrderNo(loadOrders()));
+  const [orderNo, setOrderNo] = useState('');
   const [errors, setErrors] = useState<{
     vendor?: string;
     date?: string;
@@ -2496,12 +2340,29 @@ function PlaceOrderModal({
     line: Record<string, string>;
   }>({ line: {} });
   const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [placed, setPlaced] = useState<Order | null>(null);
   const [printErr, setPrintErr] = useState('');
 
   const [advance, setAdvance] = useState<number | ''>('');
   const [advMethod, setAdvMethod] = useState<PaymentMethod>('Cash');
   const [quickForLine, setQuickForLine] = useState<string | null>(null);
+
+  // preview of the next order number (the real one is assigned on save)
+  useEffect(() => {
+    let alive = true;
+    orderService
+      .getNextOrderNumber()
+      .then((n) => {
+        if (alive) setOrderNo(n);
+      })
+      .catch(() => {
+        /* preview only */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const productOptions = (line: OrderLine): SelectOption[] => {
     const takenElsewhere = new Set(
@@ -2537,7 +2398,7 @@ function PlaceOrderModal({
 
   const priceOf = (productId: string): number => {
     const p = products.find((x) => x.id === productId);
-    return p && typeof p.price === 'number' ? p.price : 0;
+    return p ? p.price : 0;
   };
   const lineTotalReal = (l: OrderLine): number => {
     if (!l.productId || !isWholeNumber(l.quantity)) return 0;
@@ -2547,7 +2408,8 @@ function PlaceOrderModal({
   const advNum = advance === '' ? 0 : Number(advance) || 0;
   const balancePreview = roundMoney(Math.max(0, grandTotal - advNum));
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     const e: typeof errors = { line: {} };
     // ignore the empty "next" line(s); keep a single empty line so the error shows
     const filled = lines.length > 1 ? lines.filter((l) => l.productId) : lines;
@@ -2561,94 +2423,29 @@ function PlaceOrderModal({
     if (!orderDate) e.date = tr.errDate;
     if (advNum < 0 || advNum > grandTotal + 0.001) e.advance = tr.errAdvanceInvalid;
     setErrors(e);
+    setSaveError('');
     if (e.vendor || e.date || e.advance || Object.keys(e.line).length > 0) return;
 
-    const vendor = vendors.find((v) => v.id === vendorId);
-    if (!vendor) return;
-
-    const items: OrderItem[] = [];
-    for (const line of finalLines) {
-      const p = products.find((x) => x.id === line.productId);
-      if (!p) continue;
-      const unitPrice = typeof p.price === 'number' ? p.price : 0;
-      items.push({
-        id: uid('oi'),
-        productId: p.id,
-        sku: p.sku,
-        productName: p.name,
-        quantity: Number(line.quantity),
-        unitPrice,
-        lineTotal: roundMoney(unitPrice * Number(line.quantity)),
-        unit: p.unit || FALLBACK_UNIT,
+    setSaving(true);
+    try {
+      const order = await orderService.createOrder({
+        vendorId,
+        orderDate,
+        lines: finalLines.map((l) => ({
+          productId: l.productId,
+          quantity: Number(l.quantity),
+        })),
+        advanceAmount: advNum,
+        advanceMethod: advMethod,
+        historyReason: tr.histOrderPlaced,
       });
+      setPlaced(order);
+      onSaved(order);
+    } catch (err) {
+      setSaveError(describeError(err, tr, 'place'));
+    } finally {
+      setSaving(false);
     }
-
-    const now = new Date().toISOString();
-    const user = getCurrentUser();
-    const total = roundMoney(items.reduce((s, i) => s + i.lineTotal, 0));
-    const paid = roundMoney(Math.min(total, advNum));
-    const balance = roundMoney(Math.max(0, total - paid));
-
-    const firstPayment: PaymentRecord | null =
-      paid > 0
-        ? {
-            id: uid('pay'),
-            date: todayISO(),
-            amount: paid,
-            method: advMethod,
-            balanceAfter: balance,
-            recordedBy: user.name,
-            createdAt: now,
-          }
-        : null;
-
-    const newOrder: Order = {
-      id: uid('ord'),
-      orderNumber: orderNo,
-      vendorId: vendor.id,
-      vendor: {
-        uniqueId: vendor.uniqueId,
-        name: vendor.name,
-        companyName: vendor.companyName,
-        phone: vendor.phone,
-        vatNumber: vendor.vatNumber,
-        address: vendor.address,
-        city: vendor.city,
-      },
-      orderDate,
-      status: 'Pending',
-      items,
-      totalAmount: total,
-      paymentStatus: balance <= 0 ? 'Paid' : paid > 0 ? 'Partially Paid' : 'Unpaid',
-      paymentAmount: paid,
-      balanceDue: balance,
-      payments: firstPayment ? [firstPayment] : [],
-      createdBy: user.name,
-      createdAt: now,
-    };
-
-    if (!saveOrders([newOrder, ...loadOrders()])) {
-      setSaveError(tr.errStorage);
-      return;
-    }
-
-    saveHistory([
-      ...loadHistory(),
-      {
-        id: uid('sh'),
-        orderId: newOrder.id,
-        oldStatus: null,
-        newStatus: 'Pending',
-        reason: tr.histOrderPlaced,
-        changedBy: user.name,
-        changedAt: now,
-      },
-    ]);
-
-    const accOk = firstPayment ? createOrderPaymentEntry(newOrder, firstPayment) !== null : true;
-
-    setPlaced(newOrder);
-    onSaved(accOk);
   };
 
   // ---------- Step 2: order saved → Print slip / WhatsApp ----------
@@ -2759,7 +2556,7 @@ function PlaceOrderModal({
               {tr.orderNoAuto}
             </label>
             <input
-              value={orderNo}
+              value={orderNo || '—'}
               readOnly
               dir="ltr"
               className={`${inputCls} font-mono cursor-not-allowed`}
@@ -2997,14 +2794,20 @@ function PlaceOrderModal({
 
         <div className="flex gap-2.5 pt-3 border-t" style={{ borderColor: `${OLIVE}1a` }}>
           <button
-            onClick={submit}
+            onClick={() => void submit()}
+            disabled={saving}
             className={primaryBtn}
             style={{ backgroundColor: BRASS, color: WHITE }}
           >
             {Icons.cart}
             <span>{tr.placeOrder}</span>
           </button>
-          <button onClick={onClose} className={ghostBtn} style={ghostStyle}>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}
+            style={ghostStyle}
+          >
             {tr.cancel}
           </button>
         </div>
@@ -3013,9 +2816,12 @@ function PlaceOrderModal({
       {quickForLine && (
         <QuickProductModal
           tr={tr}
+          units={units}
+          knownProducts={products}
           onClose={() => setQuickForLine(null)}
           onSaved={(p) => {
             setProducts((prev) => [p, ...prev]);
+            onProductCreated(p);
             selectProduct(quickForLine, p.id, products.length + 1);
             setQuickForLine(null);
           }}
@@ -3064,6 +2870,7 @@ function ReadField({
 function OrderDetailsModal({
   order,
   history,
+  historyLoading,
   tr,
   onClose,
   onAddPayment,
@@ -3072,15 +2879,16 @@ function OrderDetailsModal({
 }: {
   order: Order;
   history: StatusHistory[];
+  historyLoading: boolean;
   tr: Translations;
   onClose: () => void;
   onAddPayment: (o: Order) => void;
   onPrint: (o: Order) => void;
   onWhatsApp: (o: Order) => void;
 }): React.JSX.Element {
-  const orderHistory = history
-    .filter((h) => h.orderId === order.id)
-    .sort((a, b) => a.changedAt.localeCompare(b.changedAt));
+  const orderHistory = [...history].sort((a, b) =>
+    a.changedAt.localeCompare(b.changedAt)
+  );
 
   return (
     <Modal
@@ -3274,7 +3082,7 @@ function OrderDetailsModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {order.payments.map((p) => (
+                  {order.payments.map((p: PaymentRecord) => (
                     <tr key={p.id} className="border-t" style={{ borderColor: `${OLIVE}1a` }}>
                       <td className="px-3 py-1.5 text-[11px]" style={{ color: CHARCOAL }}>
                         {formatDate(p.date)}
@@ -3310,7 +3118,11 @@ function OrderDetailsModal({
             <span>{tr.statusHistory}</span>
           </h3>
           <div className="space-y-1.5">
-            {orderHistory.length === 0 ? (
+            {historyLoading ? (
+              <p className="text-[11px] px-2" style={{ color: OLIVE }}>
+                {tr.loading}
+              </p>
+            ) : orderHistory.length === 0 ? (
               <p className="text-[11px] px-2" style={{ color: OLIVE }}>
                 {tr.noHistory}
               </p>
@@ -3328,7 +3140,8 @@ function OrderDetailsModal({
                       {orderStatusLabel(tr, h.newStatus)}
                     </p>
                     <p className="text-[9px] mt-0.5" style={{ color: OLIVE }}>
-                      {h.reason} • {tr.by} {h.changedBy} • {formatDateTime(h.changedAt)}
+                      {h.reason}
+                      {h.changedBy ? ` • ${tr.by} ${h.changedBy}` : ''} • {formatDateTime(h.changedAt)}
                     </p>
                   </div>
                 </div>
@@ -3361,18 +3174,24 @@ export default function OrdersPage(): React.JSX.Element {
   const isRTL = language === 'ar' || language === 'ur';
   const tr: Translations = t[language];
 
-  const [orders, setOrders] = useState<Order[]>(() => loadOrders());
-  const [history, setHistory] = useState<StatusHistory[]>(() => loadHistory());
-  const [vendors, setVendors] = useState<Vendor[]>(() => loadVendors());
+  // ✅ all data comes from the backend
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [units, setUnits] = useState<MeasuringUnit[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const [showPlaceOrder, setShowPlaceOrder] = useState(false);
   const [viewOrder, setViewOrder] = useState<Order | null>(null);
+  const [viewHistory, setViewHistory] = useState<StatusHistory[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [receiveTarget, setReceiveTarget] = useState<Order | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<Order | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | OrderStatus>('All');
@@ -3394,33 +3213,6 @@ export default function OrdersPage(): React.JSX.Element {
     }
   }, []);
 
-  const refresh = (): void => {
-    setOrders(loadOrders());
-    setHistory(loadHistory());
-    setVendors(loadVendors());
-  };
-
-  // keep the page in sync with other tabs / returning to the page
-  useEffect(() => {
-    const onStorage = (e: StorageEvent): void => {
-      if (
-        e.key === ORDERS_KEY ||
-        e.key === HISTORY_KEY ||
-        e.key === VENDORS_KEY ||
-        e.key === PRODUCTS_KEY
-      ) {
-        refresh();
-      }
-    };
-    const onFocus = (): void => refresh();
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
-
   const showSuccess = (msg: string): void => {
     setSuccessMsg(msg);
     setErrorMsg('');
@@ -3434,20 +3226,69 @@ export default function OrdersPage(): React.JSX.Element {
   };
 
   // ==========================================================
+  // LOAD FROM BACKEND
+  // ==========================================================
+  const loadAll = async (): Promise<void> => {
+    try {
+      const [ord, vend, prods, us] = await Promise.all([
+        orderService.getOrders(),
+        vendorsService.getVendors(),
+        productService.getProducts(),
+        orderService.getMeasuringUnits(),
+      ]);
+      setOrders(ord);
+      setVendors(vend);
+      setUnits(us);
+      setProducts(prods.filter((p) => p.active).map((p) => toUiProduct(p, us)));
+      // keep an open details modal in sync with the fresh data
+      setViewOrder((prev) => (prev ? ord.find((o) => o.id === prev.id) || prev : null));
+    } catch (e) {
+      showError(errMsg(e, tr.errLoad));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+  const skipInventoryEvent = useRef(false);
+  useEffect(() => {
+    loadRef.current = loadAll;
+  });
+
+  useEffect(() => {
+    void loadRef.current();
+    const onFocus = (): void => void loadRef.current();
+    const onInventory = (): void => {
+      // ignore the event this page fired itself
+      if (skipInventoryEvent.current) {
+        skipInventoryEvent.current = false;
+        return;
+      }
+      void loadRef.current();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('zakhira:inventory-updated', onInventory);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('zakhira:inventory-updated', onInventory);
+    };
+  }, []);
+
+  // tells Products / Stats pages that stock changed
+  const notifyInventory = (): void => {
+    skipInventoryEvent.current = true;
+    window.dispatchEvent(new Event('zakhira:inventory-updated'));
+  };
+
+  // ==========================================================
   // 📊 STAT CARDS
   // ==========================================================
-  // 1) Monthly Purchases — Received orders this month
+  // 1) Monthly Purchases — Received orders of this month
   const monthlyPurchases = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
+    const ym = todayISO().slice(0, 7);
     return roundMoney(
       orders
-        .filter((o) => {
-          if (o.status !== 'Received') return false;
-          const d = new Date(o.orderDate);
-          return d.getFullYear() === year && d.getMonth() === month;
-        })
+        .filter((o) => o.status === 'Received' && o.orderDate.slice(0, 7) === ym)
         .reduce((s, o) => s + o.totalAmount, 0)
     );
   }, [orders]);
@@ -3475,6 +3316,8 @@ export default function OrdersPage(): React.JSX.Element {
     () => vendors.filter((v) => v.active).length,
     [vendors]
   );
+
+  const activeVendors = useMemo(() => vendors.filter((v) => v.active), [vendors]);
 
   const filtered = useMemo(() => {
     let list = [...orders];
@@ -3528,158 +3371,79 @@ export default function OrdersPage(): React.JSX.Element {
   // ==========================================================
   // HANDLERS
   // ==========================================================
+  const openOrder = async (o: Order): Promise<void> => {
+    setViewOrder(o);
+    setViewHistory([]);
+    setHistoryLoading(true);
+    try {
+      setViewHistory(await orderService.getStatusHistory(o.id));
+    } catch {
+      /* history is optional */
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const handlePrint = (o: Order): void => {
     if (printOrderSlip(o, tr, language)) showSuccess(tr.toastPrintOpened);
     else showError(tr.toastPopupBlocked);
   };
 
-  const handleReceive = (order: Order): void => {
-    const fresh = loadOrders().find((o) => o.id === order.id);
-    if (!fresh || fresh.status !== 'Pending') {
-      showError(tr.errOnlyPendingReceive);
+  const handleReceive = async (order: Order): Promise<void> => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await orderService.receiveOrder(order.id, tr.histGoodsReceived);
+      await loadAll();
+      notifyInventory();
+      showSuccess(tr.toastReceived(order.orderNumber));
+    } catch (e) {
+      showError(describeError(e, tr, 'receive'));
+      await loadAll();
+    } finally {
       setReceiveTarget(null);
-      return;
+      setActionBusy(false);
     }
-
-    const now = new Date().toISOString();
-    const user = getCurrentUser();
-
-    const updatedProducts = loadProducts().map((p) => {
-      const qty = fresh.items
-        .filter((i) => i.productId === p.id)
-        .reduce((s, i) => s + i.quantity, 0);
-      return qty > 0 ? { ...p, stock: p.stock + qty, updatedAt: now } : p;
-    });
-    if (!saveProducts(updatedProducts)) {
-      showError(tr.errStockUpdate);
-      setReceiveTarget(null);
-      return;
-    }
-
-    const updatedOrders = loadOrders().map((o) =>
-      o.id === fresh.id ? { ...o, status: 'Received' as OrderStatus } : o
-    );
-    if (!saveOrders(updatedOrders)) {
-      showError(tr.errOrderUpdate);
-      setReceiveTarget(null);
-      return;
-    }
-
-    // Money is NOT booked here anymore — only real payments create accounting entries.
-    // Whatever is unpaid now shows up in "Supplier Payable".
-    saveHistory([
-      ...loadHistory(),
-      {
-        id: uid('sh'),
-        orderId: fresh.id,
-        oldStatus: 'Pending',
-        newStatus: 'Received',
-        reason: tr.histGoodsReceived,
-        changedBy: user.name,
-        changedAt: now,
-      },
-    ]);
-
-    refresh();
-    setReceiveTarget(null);
-    showSuccess(tr.toastReceived(fresh.orderNumber));
   };
 
-  const handleCancel = (order: Order, reason: string): void => {
-    const fresh = loadOrders().find((o) => o.id === order.id);
-    if (!fresh || fresh.status !== 'Pending') {
-      showError(tr.errOnlyPendingCancel);
+  const handleCancel = async (order: Order, reason: string): Promise<void> => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await orderService.cancelOrder(order.id, reason.trim() || tr.histCancelled);
+      await loadAll();
+      showSuccess(tr.toastCancelled(order.orderNumber));
+    } catch (e) {
+      showError(describeError(e, tr, 'cancel'));
+      await loadAll();
+    } finally {
       setCancelTarget(null);
-      return;
+      setActionBusy(false);
     }
-    if (fresh.paymentAmount > 0) {
-      showError(tr.errCancelHasPayments);
-      setCancelTarget(null);
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const user = getCurrentUser();
-
-    const updatedOrders = loadOrders().map((o) =>
-      o.id === fresh.id ? { ...o, status: 'Cancelled' as OrderStatus } : o
-    );
-    if (!saveOrders(updatedOrders)) {
-      showError(tr.errOrderUpdate);
-      setCancelTarget(null);
-      return;
-    }
-
-    saveHistory([
-      ...loadHistory(),
-      {
-        id: uid('sh'),
-        orderId: fresh.id,
-        oldStatus: 'Pending',
-        newStatus: 'Cancelled',
-        reason: reason.trim() || tr.histCancelled,
-        changedBy: user.name,
-        changedAt: now,
-      },
-    ]);
-
-    refresh();
-    setCancelTarget(null);
-    showSuccess(tr.toastCancelled(fresh.orderNumber));
   };
 
-  const handleAddPayment = (
+  const handleAddPayment = async (
     order: Order,
     data: { amount: number; method: PaymentMethod; note?: string }
-  ): void => {
-    const all = loadOrders();
-    const current = all.find((o) => o.id === order.id);
-    if (!current || !canPay(current)) {
+  ): Promise<string | null> => {
+    try {
+      await orderService.addPayment(order.id, data);
+      await loadAll();
       setPaymentTarget(null);
-      return;
+      showSuccess(tr.toastPaymentAdded);
+      return null;
+    } catch (e) {
+      const msg = describeError(e, tr, 'pay');
+      const code = e instanceof OrderServiceError ? e.code : '';
+      if (code === 'CHANGED' || code === 'NOT_PAYABLE') {
+        // the order is not what the user saw -> refresh and close
+        setPaymentTarget(null);
+        showError(msg);
+        await loadAll();
+        return null;
+      }
+      return msg;
     }
-    if (data.amount <= 0 || data.amount > current.balanceDue + 0.001) {
-      showError(tr.errAmountTooHigh);
-      return;
-    }
-
-    const user = getCurrentUser();
-    const newTotalPaid = roundMoney(current.paymentAmount + data.amount);
-    const newBalance = roundMoney(Math.max(0, current.totalAmount - newTotalPaid));
-    const newStatus: PaymentStatus =
-      newBalance <= 0 ? 'Paid' : newTotalPaid > 0 ? 'Partially Paid' : 'Unpaid';
-
-    const newPayment: PaymentRecord = {
-      id: uid('pay'),
-      date: todayISO(),
-      amount: roundMoney(data.amount),
-      method: data.method,
-      note: data.note,
-      balanceAfter: newBalance,
-      recordedBy: user.name,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedOrder: Order = {
-      ...current,
-      payments: [...current.payments, newPayment],
-      paymentAmount: newTotalPaid,
-      balanceDue: newBalance,
-      paymentStatus: newStatus,
-    };
-
-    if (!saveOrders(all.map((o) => (o.id === current.id ? updatedOrder : o)))) {
-      showError(tr.errPaymentSave);
-      return;
-    }
-
-    const txn = createOrderPaymentEntry(updatedOrder, newPayment);
-    if (!txn) showError(tr.toastAccErr);
-
-    refresh();
-    setPaymentTarget(null);
-    setViewOrder((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
-    if (txn) showSuccess(tr.toastPaymentAdded);
   };
 
   const totalQtyLabel = (o: Order): string => {
@@ -3778,6 +3542,7 @@ export default function OrdersPage(): React.JSX.Element {
       <div className="flex flex-wrap gap-3 mb-4">
         <button
           onClick={() => setShowPlaceOrder(true)}
+          disabled={loading}
           className={primaryBtn}
           style={{ backgroundColor: BRASS, color: WHITE }}
         >
@@ -3947,7 +3712,13 @@ export default function OrdersPage(): React.JSX.Element {
           </h2>
         </div>
 
-        {paginated.length > 0 ? (
+        {loading ? (
+          <div className="py-12 text-center">
+            <p className="text-[13px]" style={{ color: OLIVE }}>
+              {tr.loading}
+            </p>
+          </div>
+        ) : paginated.length > 0 ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px]">
@@ -4030,7 +3801,7 @@ export default function OrdersPage(): React.JSX.Element {
                         <div className="flex flex-nowrap items-center justify-center gap-1">
                           <button
                             type="button"
-                            onClick={() => setViewOrder(o)}
+                            onClick={() => void openOrder(o)}
                             title={tr.actView}
                             aria-label={`${tr.actView} ${o.orderNumber}`}
                             className={`${actionBtnCls} border`}
@@ -4127,10 +3898,13 @@ export default function OrdersPage(): React.JSX.Element {
       {/* MODALS */}
       {showPlaceOrder && (
         <PlaceOrderModal
+          products={products}
+          vendors={activeVendors}
+          units={units}
+          onProductCreated={(p) => setProducts((prev) => [p, ...prev])}
           onClose={() => setShowPlaceOrder(false)}
-          onSaved={(accOk) => {
-            refresh();
-            if (!accOk) showError(tr.toastAccErr);
+          onSaved={() => {
+            void loadAll();
           }}
           tr={tr}
           language={language}
@@ -4140,7 +3914,8 @@ export default function OrdersPage(): React.JSX.Element {
       {viewOrder && (
         <OrderDetailsModal
           order={viewOrder}
-          history={history}
+          history={viewHistory}
+          historyLoading={historyLoading}
           tr={tr}
           onClose={() => setViewOrder(null)}
           onAddPayment={(o) => setPaymentTarget(o)}
@@ -4164,7 +3939,8 @@ export default function OrdersPage(): React.JSX.Element {
           message={receiveMessage(receiveTarget)}
           confirmLabel={tr.receiveConfirm}
           cancelLabel={tr.cancel}
-          onConfirm={() => handleReceive(receiveTarget)}
+          busy={actionBusy}
+          onConfirm={() => void handleReceive(receiveTarget)}
           onCancel={() => setReceiveTarget(null)}
         />
       )}
@@ -4176,8 +3952,9 @@ export default function OrdersPage(): React.JSX.Element {
           confirmLabel={tr.cancelConfirm}
           cancelLabel={tr.cancel}
           danger
+          busy={actionBusy}
           reasonLabel={tr.cancelReasonLabel}
-          onConfirm={(reason) => handleCancel(cancelTarget, reason)}
+          onConfirm={(reason) => void handleCancel(cancelTarget, reason)}
           onCancel={() => setCancelTarget(null)}
         />
       )}

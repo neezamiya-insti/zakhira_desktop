@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import bgImage from './bg1.png';
-import logo from './zakhira-logo.svg'; // zakhira logo.pdf ko SVG/PNG export kar ke auth folder mein rakhein
+import logo from './zakhira-logo.svg';
+import { supabase } from '../../lib/supabaseClient'; // <-- APNA SAHI PATH CHECK KAR LENA
 
 type Language = 'en' | 'ar' | 'ur' | 'hi';
 
@@ -39,8 +40,6 @@ const t = {
     loggingIn: 'Signing in...',
     inventory: 'Inventory Management',
     desc: 'Track stock, sales and purchases in one place. Work in your own language and stay in full control of your business.',
-    demo: 'Demo credentials',
-    demoHint: 'Tap to fill',
     empty: 'Please enter email and password',
     invalid: 'Invalid email or password.',
     show: 'Show password',
@@ -59,8 +58,6 @@ const t = {
     loggingIn: 'جارٍ تسجيل الدخول...',
     inventory: 'إدارة المخزون',
     desc: 'تابع المخزون والمبيعات والمشتريات في مكان واحد. اعمل بلغتك وابقَ مسيطراً على عملك.',
-    demo: 'بيانات تجريبية',
-    demoHint: 'اضغط للتعبئة',
     empty: 'الرجاء إدخال البريد الإلكتروني وكلمة المرور',
     invalid: 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
     show: 'إظهار كلمة المرور',
@@ -79,8 +76,6 @@ const t = {
     loggingIn: 'لاگ ان ہو رہا ہے...',
     inventory: 'انوینٹری مینجمنٹ',
     desc: 'اسٹاک، فروخت اور خریداری ایک ہی جگہ سنبھالیں۔ اپنی زبان میں کام کریں اور کاروبار پر مکمل کنٹرول رکھیں۔',
-    demo: 'ڈیمو اکاؤنٹ',
-    demoHint: 'بھرنے کے لیے دبائیں',
     empty: 'ای میل اور پاس ورڈ درج کریں',
     invalid: 'غلط ای میل یا پاس ورڈ',
     show: 'پاس ورڈ دکھائیں',
@@ -99,8 +94,6 @@ const t = {
     loggingIn: 'साइन इन हो रहा है...',
     inventory: 'इन्वेंट्री मैनेजमेंट',
     desc: 'स्टॉक, बिक्री और खरीद एक ही जगह संभालें। अपनी भाषा में काम करें और अपने कारोबार पर पूरा नियंत्रण रखें।',
-    demo: 'डेमो क्रेडेंशियल',
-    demoHint: 'भरने के लिए टैप करें',
     empty: 'कृपया ईमेल और पासवर्ड दर्ज करें',
     invalid: 'ईमेल या पासवर्ड गलत है',
     show: 'पासवर्ड दिखाएँ',
@@ -117,7 +110,6 @@ const ICON_PATHS = {
     'M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22',
   alert:
     'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
-  key: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4',
   arrow: 'M5 12h14M13 6l6 6-6 6',
 } as const;
 
@@ -202,13 +194,7 @@ const inputClass =
 
 const BG_SIZE = '24%';
 const BG_POSITION = 'right top';
-
-// Green panel ke text ki LEFT position (panel width ka %).
-// Text aur left chahiye to number kam karein, right chahiye to zyada karein.
 const GREEN_CONTENT_LEFT = '20%';
-
-const DEMO_EMAIL = 'admin@zakhira.com';
-const DEMO_PASSWORD = 'admin123';
 
 export default function LoginPage(): React.JSX.Element {
   const navigate = useNavigate();
@@ -225,7 +211,7 @@ export default function LoginPage(): React.JSX.Element {
   const isRtl = language === 'ar' || language === 'ur';
   const dir = isRtl ? 'rtl' : 'ltr';
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>): void => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setError('');
 
@@ -236,25 +222,44 @@ export default function LoginPage(): React.JSX.Element {
 
     setLoading(true);
 
-    setTimeout((): void => {
-      setLoading(false);
+    try {
+      console.log("Attempting Supabase login for:", email);
+      
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
 
-      if (email === DEMO_EMAIL && password === DEMO_PASSWORD) {
-        localStorage.setItem(
-          'zakhira_user',
-          JSON.stringify({ email, role: 'owner', language })
-        );
+      // Logs for debugging
+      console.log("Supabase Auth Response:", data);
+      if (authError) {
+        console.error("Supabase Auth Error:", authError.message);
+        setError(tr.invalid);
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        console.log("Login successful! User:", data.user.id);
+        
+        localStorage.setItem('zakhira_user', JSON.stringify({ 
+          email: data.user.email, 
+          id: data.user.id,
+          role: 'owner', 
+          language 
+        }));
+        
         sessionStorage.setItem('zakhira_authenticated', 'true');
         navigate('/dashboard');
-      } else {
-        setError(tr.invalid);
       }
-    }, 1000);
+    } catch (err) {
+      console.error("Catch Error:", err);
+      setError("An unexpected error occurred.");
+      setLoading(false);
+    }
   };
 
   return (
-    // Page layout hamesha LTR rehta hai (login left, green right).
-    // Sirf content ka direction language ke hisaab se badalta hai.
     <div
       dir="ltr"
       className="relative min-h-screen w-full overflow-hidden"
@@ -273,7 +278,6 @@ export default function LoginPage(): React.JSX.Element {
           right: 0,
         }}
       >
-        {/* Language strip: hamesha green side ke LEFT corner par */}
         <LanguageStrip
           language={language}
           onChange={setLanguage}
@@ -312,7 +316,6 @@ export default function LoginPage(): React.JSX.Element {
 
       {/* ============ LOGIN SIDE ============ */}
       <div className="relative z-10 flex min-h-screen flex-col px-6 pt-1 pb-5 sm:px-10 lg:w-[53%] lg:px-12 lg:pt-1 lg:pb-6 max-lg:min-h-[calc(100vh-2.25rem)]">
-        {/* Real logo: white hisse (screen ka left 40%) ke bilkul center mein */}
         <div className="-mt-7 -mb-6 flex w-full justify-center lg:w-[calc(40vw-3rem)]">
           <img
             src={logo}
@@ -446,44 +449,6 @@ export default function LoginPage(): React.JSX.Element {
                   )}
                 </button>
               </form>
-
-              {/* Demo credentials */}
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail(DEMO_EMAIL);
-                  setPassword(DEMO_PASSWORD);
-                  setError('');
-                }}
-                className="mt-4 flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-start transition-colors hover:bg-[#C49A5A]/15"
-                style={{
-                  borderColor: 'rgba(196,154,90,0.5)',
-                  background: 'rgba(196,154,90,0.08)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span
-                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full"
-                  style={{ background: THEME.warmBrass, color: THEME.deepForest }}
-                >
-                  <Icon name="key" className="w-3.5 h-3.5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between text-[11px] font-semibold" style={{ color: THEME.charcoal }}>
-                    {tr.demo}
-                    <span className="font-normal" style={{ color: THEME.mutedOlive }}>
-                      {tr.demoHint}
-                    </span>
-                  </span>
-                  <span
-                    dir="ltr"
-                    className="mt-0.5 block text-start font-mono text-[10px] leading-snug"
-                    style={{ color: THEME.mutedOlive }}
-                  >
-                    {DEMO_EMAIL} · {DEMO_PASSWORD}
-                  </span>
-                </span>
-              </button>
             </div>
           </div>
         </div>

@@ -1,46 +1,14 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable prettier/prettier */
-import { useEffect, useMemo, useRef, useState } from 'react';
-
-// ============================================================
-// 🎨 THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
-
-// ============================================================
-// TYPES
-// ============================================================
-type Vendor = {
-  id: string;
-  uniqueId: string;
-  name: string;
-  companyName: string;
-  phone: string;
-  address: string;
-  city: string;
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type VendorInput = {
-  name: string;
-  companyName: string;
-  phone: string;
-  address: string;
-  city: string;
-};
-
-type Order = {
-  id: string;
-  vendorId: string;
-};
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  vendorsService,
+  VendorHasOrdersError,
+  type Vendor,
+  type VendorInput,
+} from '@renderer/services/vendorsservice';
 
 // ============================================================
 // 🌍 LANGUAGE
@@ -91,6 +59,7 @@ const t = {
     addressPh: 'Street, Building, Area',
     saveVendor: 'Save Vendor',
     updateVendor: 'Update Vendor',
+    saving: 'Saving...',
     cancel: 'Cancel',
     required: 'Required',
     errName: 'Name is required',
@@ -99,7 +68,7 @@ const t = {
     errPhoneFormat: 'Enter phone with country code, e.g. +966 50 123 4567',
     errAddress: 'Address is required',
     errCity: 'City is required',
-    errStorage: 'Could not save — storage may be full.',
+    errStorage: 'Could not save the vendor. Please try again.',
     contactPerson: 'Contact Person',
     company: 'Company',
     phone: 'Phone',
@@ -129,8 +98,11 @@ const t = {
     toastDeactivated: (id: string) => `Deactivated — ${id}`,
     errHasOrders: (name: string, count: number) =>
       `${name} has ${count} order${count === 1 ? '' : 's'} and cannot be deleted. Deactivate it instead.`,
-    errDeleteStorage: 'Could not delete — storage may be full.',
-    errUpdateStorage: 'Could not update — storage may be full.',
+    errDeleteStorage: 'Could not delete the vendor. Please try again.',
+    errUpdateStorage: 'Could not update the vendor. Please try again.',
+    loading: 'Loading vendors...',
+    loadError: 'Could not load vendors. Check your connection and try again.',
+    retry: 'Retry',
     showing: 'Showing',
     of: 'of',
     actView: 'View',
@@ -182,6 +154,7 @@ const t = {
     addressPh: 'الشارع، المبنى، المنطقة',
     saveVendor: 'حفظ المورد',
     updateVendor: 'تحديث المورد',
+    saving: 'جارٍ الحفظ...',
     cancel: 'إلغاء',
     required: 'مطلوب',
     errName: 'الاسم مطلوب',
@@ -190,7 +163,7 @@ const t = {
     errPhoneFormat: 'أدخل الهاتف مع رمز الدولة، مثال: +966 50 123 4567',
     errAddress: 'العنوان مطلوب',
     errCity: 'المدينة مطلوبة',
-    errStorage: 'تعذر الحفظ — قد تكون مساحة التخزين ممتلئة.',
+    errStorage: 'تعذر حفظ المورد. حاول مرة أخرى.',
     contactPerson: 'جهة الاتصال',
     company: 'الشركة',
     phone: 'الهاتف',
@@ -220,8 +193,11 @@ const t = {
     toastDeactivated: (id: string) => `تم التعطيل — ${id}`,
     errHasOrders: (name: string, count: number) =>
       `${name} لديه ${count} ${count === 1 ? 'طلب' : 'طلبات'} ولا يمكن حذفه. عطّله بدلاً من ذلك.`,
-    errDeleteStorage: 'تعذر الحذف — قد تكون مساحة التخزين ممتلئة.',
-    errUpdateStorage: 'تعذر التحديث — قد تكون مساحة التخزين ممتلئة.',
+    errDeleteStorage: 'تعذر حذف المورد. حاول مرة أخرى.',
+    errUpdateStorage: 'تعذر تحديث المورد. حاول مرة أخرى.',
+    loading: 'جارٍ تحميل الموردين...',
+    loadError: 'تعذر تحميل الموردين. تحقق من الاتصال وحاول مرة أخرى.',
+    retry: 'إعادة المحاولة',
     showing: 'عرض',
     of: 'من',
     actView: 'عرض',
@@ -273,6 +249,7 @@ const t = {
     addressPh: 'گلی، عمارت، علاقہ',
     saveVendor: 'وینڈر محفوظ کریں',
     updateVendor: 'وینڈر اپ ڈیٹ کریں',
+    saving: 'محفوظ ہو رہا ہے...',
     cancel: 'منسوخ',
     required: 'لازمی',
     errName: 'نام لازمی ہے',
@@ -281,7 +258,7 @@ const t = {
     errPhoneFormat: 'ملکی کوڈ کے ساتھ فون درج کریں، مثلاً: +966 50 123 4567',
     errAddress: 'پتہ لازمی ہے',
     errCity: 'شہر لازمی ہے',
-    errStorage: 'محفوظ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errStorage: 'وینڈر محفوظ نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
     contactPerson: 'رابطہ شخص',
     company: 'کمپنی',
     phone: 'فون',
@@ -311,8 +288,11 @@ const t = {
     toastDeactivated: (id: string) => `غیر فعال ہو گیا — ${id}`,
     errHasOrders: (name: string, count: number) =>
       `${name} کے پاس ${count} ${count === 1 ? 'آرڈر' : 'آرڈرز'} ہیں اور اسے حذف نہیں کیا جا سکتا۔ اسے غیر فعال کریں۔`,
-    errDeleteStorage: 'حذف نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
-    errUpdateStorage: 'اپ ڈیٹ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errDeleteStorage: 'وینڈر حذف نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
+    errUpdateStorage: 'وینڈر اپ ڈیٹ نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
+    loading: 'وینڈرز لوڈ ہو رہے ہیں...',
+    loadError: 'وینڈرز لوڈ نہیں ہو سکے۔ کنکشن چیک کریں اور دوبارہ کوشش کریں۔',
+    retry: 'دوبارہ کوشش کریں',
     showing: 'دکھا رہے ہیں',
     of: 'میں سے',
     actView: 'دیکھیں',
@@ -364,6 +344,7 @@ const t = {
     addressPh: 'गली, भवन, क्षेत्र',
     saveVendor: 'विक्रेता सहेजें',
     updateVendor: 'विक्रेता अपडेट करें',
+    saving: 'सहेजा जा रहा है...',
     cancel: 'रद्द करें',
     required: 'आवश्यक',
     errName: 'नाम आवश्यक है',
@@ -372,7 +353,7 @@ const t = {
     errPhoneFormat: 'देश कोड के साथ फ़ोन दर्ज करें, जैसे: +966 50 123 4567',
     errAddress: 'पता आवश्यक है',
     errCity: 'शहर आवश्यक है',
-    errStorage: 'सहेजा नहीं जा सका — स्टोरेज भरा हो सकता है।',
+    errStorage: 'विक्रेता सहेजा नहीं जा सका। फिर कोशिश करें।',
     contactPerson: 'संपर्क व्यक्ति',
     company: 'कंपनी',
     phone: 'फ़ोन',
@@ -402,8 +383,11 @@ const t = {
     toastDeactivated: (id: string) => `निष्क्रिय किया गया — ${id}`,
     errHasOrders: (name: string, count: number) =>
       `${name} के पास ${count} ऑर्डर हैं और इसे हटाया नहीं जा सकता। इसके बजाय निष्क्रिय करें।`,
-    errDeleteStorage: 'हटाया नहीं जा सका — स्टोरेज भरा हो सकता है।',
-    errUpdateStorage: 'अपडेट नहीं हो सका — स्टोरेज भरा हो सकता है।',
+    errDeleteStorage: 'विक्रेता हटाया नहीं जा सका। फिर कोशिश करें।',
+    errUpdateStorage: 'विक्रेता अपडेट नहीं हो सका। फिर कोशिश करें।',
+    loading: 'विक्रेता लोड हो रहे हैं...',
+    loadError: 'विक्रेता लोड नहीं हो सके। कनेक्शन जाँचें और फिर कोशिश करें।',
+    retry: 'पुनः प्रयास',
     showing: 'दिखा रहे हैं',
     of: 'में से',
     actView: 'देखें',
@@ -552,23 +536,7 @@ const Icons = {
 // ============================================================
 // CONSTANTS & HELPERS
 // ============================================================
-const VENDORS_KEY = 'zakhira_inventory_vendors';
-const ORDERS_KEY = 'zakhira_inventory_orders';
 const PAGE_SIZE = 10;
-
-const uid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const generateVendorId = (existing: Vendor[]): string => {
-  const numbers = existing
-    .map((v) => {
-      const m = v.uniqueId.match(/VND-(\d+)/);
-      return m ? parseInt(m[1], 10) : 0;
-    })
-    .filter((n) => n > 0);
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `VND-${String(max + 1).padStart(4, '0')}`;
-};
 
 const normalizePhone = (raw: string): string => {
   let s = raw.trim().replace(/[\s\-().]/g, '');
@@ -606,40 +574,6 @@ const formatDate = (iso: string, lang: Language = 'en'): string => {
 };
 
 // ============================================================
-// STORAGE
-// ============================================================
-const loadVendors = (): Vendor[] => {
-  try {
-    const raw = localStorage.getItem(VENDORS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveVendors = (vendors: Vendor[]): boolean => {
-  try {
-    localStorage.setItem(VENDORS_KEY, JSON.stringify(vendors));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const loadOrders = (): Order[] => {
-  try {
-    const raw = localStorage.getItem(ORDERS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-// ============================================================
 // STYLES — theme only (inline) [COMPACT]
 // ============================================================
 const labelCls =
@@ -652,12 +586,11 @@ const errCls = 'text-[10px] font-semibold mt-1 px-2';
 const primaryBtn =
   'h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all duration-300 hover:brightness-95 hover:shadow-md flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
 const ghostBtn =
-  'h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer border-2 transition-all flex items-center justify-center gap-1.5';
+  'h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer border-2 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
 
 const actionBtnBase =
   'inline-flex h-7 w-7 items-center justify-center rounded-full border cursor-pointer transition';
 
-// Reusable inline styles
 const inputStyle = (): React.CSSProperties => ({
   borderColor: 'rgba(102,116,90,0.2)',
   backgroundColor: 'rgba(247,243,234,0.6)',
@@ -776,7 +709,7 @@ function Modal({
 }
 
 // ============================================================
-// VENDOR FORM MODAL [COMPACT]
+// VENDOR FORM MODAL  (ab vendorsService se save hota hai)
 // ============================================================
 function VendorFormModal({
   vendor,
@@ -786,7 +719,7 @@ function VendorFormModal({
 }: {
   vendor?: Vendor | null;
   onClose: () => void;
-  onSaved: (v: Vendor) => void;
+  onSaved: (v: Vendor, wasEdit: boolean) => void;
   tr: Translations;
 }): React.JSX.Element {
   const [form, setForm] = useState<VendorInput>({
@@ -800,14 +733,29 @@ function VendorFormModal({
     Partial<Record<keyof VendorInput, string>>
   >({});
   const [saveError, setSaveError] = useState('');
-  const [uniqueId] = useState(
-    () => vendor?.uniqueId ?? generateVendorId(loadVendors())
-  );
+  const [saving, setSaving] = useState(false);
+
+  // naye vendor ki ID server se aati hai (sirf dikhane ke liye; save par dobara banti hai)
+  const [uniqueId, setUniqueId] = useState(vendor?.uniqueId ?? '');
+  useEffect(() => {
+    if (vendor) return;
+    let cancelled = false;
+    vendorsService
+      .getNextUniqueId()
+      .then((id) => {
+        if (!cancelled) setUniqueId(id);
+      })
+      .catch((e) => console.error('getNextUniqueId failed', e));
+    return () => {
+      cancelled = true;
+    };
+  }, [vendor]);
 
   const set = (k: keyof VendorInput, v: string): void =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     const e: Partial<Record<keyof VendorInput, string>> = {};
     if (!form.name.trim()) e.name = tr.errName;
     if (!form.companyName.trim()) e.companyName = tr.errCompany;
@@ -818,46 +766,25 @@ function VendorFormModal({
     setErrors(e);
     if (Object.keys(e).length > 0) return;
 
-    const list = loadVendors();
-    const now = new Date().toISOString();
+    const input: VendorInput = {
+      name: form.name.trim(),
+      companyName: form.companyName.trim(),
+      phone: normalizePhone(form.phone),
+      address: form.address.trim(),
+      city: form.city.trim(),
+    };
 
-    if (vendor) {
-      const updated: Vendor = {
-        ...vendor,
-        name: form.name.trim(),
-        companyName: form.companyName.trim(),
-        phone: normalizePhone(form.phone),
-        address: form.address.trim(),
-        city: form.city.trim(),
-        updatedAt: now,
-      };
-      const ok = saveVendors(
-        list.map((v) => (v.id === vendor.id ? updated : v))
-      );
-      if (!ok) {
-        setSaveError(tr.errStorage);
-        return;
-      }
-      onSaved(updated);
-    } else {
-      const newVendor: Vendor = {
-        id: uid('vnd'),
-        uniqueId,
-        name: form.name.trim(),
-        companyName: form.companyName.trim(),
-        phone: normalizePhone(form.phone),
-        address: form.address.trim(),
-        city: form.city.trim(),
-        active: true,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const ok = saveVendors([newVendor, ...list]);
-      if (!ok) {
-        setSaveError(tr.errStorage);
-        return;
-      }
-      onSaved(newVendor);
+    setSaving(true);
+    setSaveError('');
+    try {
+      const saved = vendor
+        ? await vendorsService.updateVendor(vendor.id, input)
+        : await vendorsService.createVendor(input);
+      onSaved(saved, !!vendor);
+    } catch (err) {
+      console.error('save vendor failed', err);
+      setSaveError(tr.errStorage);
+      setSaving(false);
     }
   };
 
@@ -869,7 +796,9 @@ function VendorFormModal({
     <Modal
       title={vendor ? tr.editVendorTitle : tr.addVendorTitle}
       subtitle={
-        vendor ? tr.editingVendor(vendor.uniqueId) : tr.newVendorId(uniqueId)
+        vendor
+          ? tr.editingVendor(vendor.uniqueId)
+          : tr.newVendorId(uniqueId || '…')
       }
       onClose={onClose}
       maxWidth="max-w-2xl"
@@ -880,7 +809,7 @@ function VendorFormModal({
             {tr.uniqueIdAuto}
           </label>
           <input
-            value={uniqueId}
+            value={uniqueId || '…'}
             readOnly
             className={`${inputCls} font-mono cursor-not-allowed`}
             style={{
@@ -898,6 +827,7 @@ function VendorFormModal({
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
             placeholder={tr.namePh}
+            maxLength={120}
             className={inputCls}
             style={inputStyle()}
           />
@@ -915,6 +845,7 @@ function VendorFormModal({
             value={form.companyName}
             onChange={(e) => set('companyName', e.target.value)}
             placeholder={tr.companyPh}
+            maxLength={150}
             className={inputCls}
             style={inputStyle()}
           />
@@ -933,6 +864,7 @@ function VendorFormModal({
             value={form.phone}
             onChange={(e) => set('phone', e.target.value)}
             placeholder={tr.phonePh}
+            maxLength={25}
             className={`${inputCls} font-mono`}
             style={inputStyle()}
           />
@@ -957,6 +889,7 @@ function VendorFormModal({
             value={form.city}
             onChange={(e) => set('city', e.target.value)}
             placeholder={tr.cityPh}
+            maxLength={80}
             className={inputCls}
             style={inputStyle()}
           />
@@ -974,6 +907,7 @@ function VendorFormModal({
             value={form.address}
             onChange={(e) => set('address', e.target.value)}
             placeholder={tr.addressPh}
+            maxLength={255}
             className={inputCls}
             style={inputStyle()}
           />
@@ -1004,14 +938,22 @@ function VendorFormModal({
         style={{ borderColor: 'rgba(102,116,90,0.1)' }}
       >
         <button
-          onClick={submit}
+          onClick={() => void submit()}
+          disabled={saving}
           className={primaryBtn}
           style={primaryBtnStyle}
         >
           {vendor ? Icons.check : Icons.plus}
-          <span>{vendor ? tr.updateVendor : tr.saveVendor}</span>
+          <span>
+            {saving ? tr.saving : vendor ? tr.updateVendor : tr.saveVendor}
+          </span>
         </button>
-        <button onClick={onClose} className={ghostBtn} style={ghostBtnStyle}>
+        <button
+          onClick={onClose}
+          disabled={saving}
+          className={ghostBtn}
+          style={ghostBtnStyle}
+        >
           {tr.cancel}
         </button>
       </div>
@@ -1174,6 +1116,7 @@ function ConfirmModal({
   confirmLabel,
   cancelLabel,
   danger = false,
+  busy = false,
   onConfirm,
   onCancel,
 }: {
@@ -1182,6 +1125,7 @@ function ConfirmModal({
   confirmLabel: string;
   cancelLabel: string;
   danger?: boolean;
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }): React.JSX.Element {
@@ -1191,12 +1135,18 @@ function ConfirmModal({
         {message}
       </p>
       <div className="flex gap-2">
-        <button onClick={onCancel} className={`${ghostBtn} flex-1`} style={ghostBtnStyle}>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className={`${ghostBtn} flex-1`}
+          style={ghostBtnStyle}
+        >
           {cancelLabel}
         </button>
         <button
           onClick={onConfirm}
-          className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition hover:brightness-95"
+          disabled={busy}
+          className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
             backgroundColor: danger ? THEME.charcoal : THEME.warmBrass,
             color: '#FFFFFF',
@@ -1313,11 +1263,14 @@ export default function VendorsPage(): React.JSX.Element {
     return () => window.removeEventListener('storage', sync);
   }, []);
 
-  const tr = t[language];
+  const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
-  const [vendors, setVendors] = useState<Vendor[]>(() => loadVendors());
-  const [orders] = useState<Order[]>(() => loadOrders());
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [orderCounts, setOrderCounts] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -1335,9 +1288,44 @@ export default function VendorsPage(): React.JSX.Element {
   >('Active');
   const [page, setPage] = useState(1);
 
-  const refresh = (): void => {
-    setVendors(loadVendors());
-  };
+  // ----------------------------------------------------------
+  // DATA LOADING (Supabase via vendorsService)
+  // ----------------------------------------------------------
+  // sirf sabse naya request apna result set kare (race condition se bachao)
+  const requestId = useRef(0);
+
+  const load = useCallback(async (silent = false): Promise<void> => {
+    const myId = ++requestId.current;
+    if (!silent) setLoading(true);
+    try {
+      const [v, c] = await Promise.all([
+        vendorsService.getVendors(),
+        vendorsService.getOrderCounts(),
+      ]);
+      if (myId !== requestId.current) return;
+      setVendors(v);
+      setOrderCounts(c);
+      setLoadError(false);
+    } catch (e) {
+      console.error('load vendors failed', e);
+      if (myId !== requestId.current) return;
+      setLoadError(true);
+    } finally {
+      if (myId === requestId.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const onFocus = (): void => {
+      void load(true);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      requestId.current++; // unmount ke baad koi setState na ho
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
 
   const showSuccess = (msg: string): void => {
     setSuccessMsg(msg);
@@ -1350,14 +1338,6 @@ export default function VendorsPage(): React.JSX.Element {
     setSuccessMsg('');
     setTimeout(() => setErrorMsg(''), 3500);
   };
-
-  const orderCountByVendor = useMemo(() => {
-    const map = new Map<string, number>();
-    orders.forEach((o) => {
-      map.set(o.vendorId, (map.get(o.vendorId) ?? 0) + 1);
-    });
-    return map;
-  }, [orders]);
 
   const uniqueCities = useMemo(() => {
     const set = new Set<string>();
@@ -1393,7 +1373,13 @@ export default function VendorsPage(): React.JSX.Element {
     return list;
   }, [vendors, search, cityFilter, statusFilter]);
 
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // delete / filter ke baad page bahar na reh jaye
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const paginated = filtered.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
 
   const totalVendors = vendors.filter((v) => v.active).length;
 
@@ -1409,14 +1395,13 @@ export default function VendorsPage(): React.JSX.Element {
     cityFilter !== 'All' ||
     statusFilter !== 'Active';
 
-  const handleSaved = (v: Vendor): void => {
-    refresh();
+  const handleSaved = (v: Vendor, wasEdit: boolean): void => {
     setShowForm(false);
-    const wasEdit = editingVendor !== null;
     setEditingVendor(null);
     showSuccess(
       wasEdit ? tr.toastUpdated(v.uniqueId) : tr.toastAdded(v.uniqueId)
     );
+    void load(true);
   };
 
   const handleEdit = (v: Vendor): void => {
@@ -1424,43 +1409,44 @@ export default function VendorsPage(): React.JSX.Element {
     setShowForm(true);
   };
 
-  const handleDelete = (v: Vendor): void => {
-    const count = orderCountByVendor.get(v.id) ?? 0;
-    if (count > 0) {
-      showError(tr.errHasOrders(v.companyName, count));
+  const handleDelete = async (v: Vendor): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await vendorsService.deleteVendor(v.id);
+      showSuccess(tr.toastDeleted(v.uniqueId));
+      await load(true);
+    } catch (e) {
+      if (e instanceof VendorHasOrdersError) {
+        showError(tr.errHasOrders(v.companyName, e.count));
+      } else {
+        console.error('delete vendor failed', e);
+        showError(tr.errDeleteStorage);
+      }
+    } finally {
       setDeleteTarget(null);
-      return;
+      setBusy(false);
     }
-    const list = loadVendors().filter((x) => x.id !== v.id);
-    const ok = saveVendors(list);
-    if (!ok) {
-      showError(tr.errDeleteStorage);
-      setDeleteTarget(null);
-      return;
-    }
-    refresh();
-    setDeleteTarget(null);
-    showSuccess(tr.toastDeleted(v.uniqueId));
   };
 
-  const handleToggleActive = (v: Vendor): void => {
-    const now = new Date().toISOString();
-    const list = loadVendors().map((x) =>
-      x.id === v.id ? { ...x, active: !x.active, updatedAt: now } : x
-    );
-    const ok = saveVendors(list);
-    if (!ok) {
+  const handleToggleActive = async (v: Vendor): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await vendorsService.setVendorActive(v.id, !v.active);
+      showSuccess(
+        v.active
+          ? tr.toastDeactivated(v.uniqueId)
+          : tr.toastActivated(v.uniqueId)
+      );
+      await load(true);
+    } catch (e) {
+      console.error('toggle vendor failed', e);
       showError(tr.errUpdateStorage);
+    } finally {
       setToggleTarget(null);
-      return;
+      setBusy(false);
     }
-    refresh();
-    setToggleTarget(null);
-    showSuccess(
-      v.active
-        ? tr.toastDeactivated(v.uniqueId)
-        : tr.toastActivated(v.uniqueId)
-    );
   };
 
   return (
@@ -1482,7 +1468,7 @@ export default function VendorsPage(): React.JSX.Element {
         </p>
       </div>
 
-      {/* BANNERS — theme only */}
+      {/* BANNERS */}
       {successMsg && (
         <div
           className="mb-3 px-3 py-2 rounded-full text-[11px] font-bold flex items-center gap-2"
@@ -1507,6 +1493,29 @@ export default function VendorsPage(): React.JSX.Element {
         >
           {Icons.alert}
           <span>{errorMsg}</span>
+        </div>
+      )}
+      {loadError && (
+        <div
+          className="mb-3 px-3 py-2 rounded-full text-[11px] font-bold flex items-center justify-between gap-2"
+          style={{
+            backgroundColor: 'rgba(196,154,90,0.15)',
+            border: `2px solid rgba(196,154,90,0.4)`,
+            color: THEME.charcoal,
+          }}
+        >
+          <span className="flex items-center gap-2">
+            {Icons.alert}
+            <span>{tr.loadError}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="font-bold hover:underline cursor-pointer flex-shrink-0"
+            style={{ color: THEME.warmBrass }}
+          >
+            {tr.retry}
+          </button>
         </div>
       )}
 
@@ -1535,7 +1544,7 @@ export default function VendorsPage(): React.JSX.Element {
               className="text-[14px] font-bold"
               style={{ color: THEME.charcoal }}
             >
-              {totalVendors}
+              {loading && vendors.length === 0 ? '—' : totalVendors}
             </p>
             <p
               className="text-[9px] uppercase tracking-wider font-bold"
@@ -1687,7 +1696,14 @@ export default function VendorsPage(): React.JSX.Element {
           </h2>
         </div>
 
-        {paginated.length > 0 ? (
+        {loading && vendors.length === 0 ? (
+          <div
+            className="py-12 text-center text-[13px]"
+            style={{ color: THEME.mutedOlive }}
+          >
+            {tr.loading}
+          </div>
+        ) : paginated.length > 0 ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px]">
@@ -1893,7 +1909,7 @@ export default function VendorsPage(): React.JSX.Element {
             </div>
 
             <Pagination
-              page={page}
+              page={safePage}
               total={filtered.length}
               onPage={setPage}
               tr={tr}
@@ -1933,7 +1949,7 @@ export default function VendorsPage(): React.JSX.Element {
       {viewVendor && (
         <VendorDetailsModal
           vendor={viewVendor}
-          orderCount={orderCountByVendor.get(viewVendor.id) ?? 0}
+          orderCount={orderCounts[viewVendor.id] ?? 0}
           onClose={() => setViewVendor(null)}
           tr={tr}
           lang={language}
@@ -1952,7 +1968,8 @@ export default function VendorsPage(): React.JSX.Element {
           }
           confirmLabel={toggleTarget.active ? tr.deactivate : tr.activate}
           cancelLabel={tr.cancel}
-          onConfirm={() => handleToggleActive(toggleTarget)}
+          busy={busy}
+          onConfirm={() => void handleToggleActive(toggleTarget)}
           onCancel={() => setToggleTarget(null)}
         />
       )}
@@ -1967,7 +1984,8 @@ export default function VendorsPage(): React.JSX.Element {
           confirmLabel={tr.delete}
           cancelLabel={tr.cancel}
           danger
-          onConfirm={() => handleDelete(deleteTarget)}
+          busy={busy}
+          onConfirm={() => void handleDelete(deleteTarget)}
           onCancel={() => setDeleteTarget(null)}
         />
       )}

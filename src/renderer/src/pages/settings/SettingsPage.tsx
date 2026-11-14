@@ -1,6 +1,8 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useMemo } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import { settingsService } from '@renderer/services/settingsService';
 import {
   DEFAULT_SALES_FORM_FIELDS,
   loadSalesFormFields,
@@ -10,20 +12,20 @@ import {
 } from '../sales/salesFormFields';
 
 // ============================================================
-// 🎨 THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
-
-// ============================================================
 // TYPES
 // ============================================================
 export type Lang = 'en' | 'ar' | 'ur' | 'hi';
+
+type DbSalesField = Awaited<
+  ReturnType<typeof settingsService.getSalesFormFields>
+>[number];
+
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
+};
 
 // ============================================================
 // 🌍 TRANSLATIONS (EN, AR, UR, HI)
@@ -64,7 +66,8 @@ const t = {
     delete: 'Delete',
     // Sales Form tab
     salesFormFields: 'Sales Form Fields',
-    salesFormHint: 'Changes save automatically.',
+    salesFormHint: 'Edit the fields, then press Save.',
+    unsavedChanges: 'Unsaved changes',
     addField: 'Add Field',
     englishLabel: 'English',
     urduLabel: 'Urdu',
@@ -80,6 +83,18 @@ const t = {
     defaultFormatHint: 'New print jobs will open with this format',
     availableFormats: 'Available Formats',
     printInfo: 'The last-used format is remembered automatically. This default is only used when no previous format has been saved.',
+    // Errors / loading
+    errorTitle: 'Something went wrong',
+    errLoadUnits: 'Could not load measuring units',
+    errLoadFields: 'Could not load sales form fields',
+    errLoadPrint: 'Could not load print settings',
+    errSaveUnit: 'Could not save unit',
+    errDeleteUnit: 'Could not delete unit',
+    errResetUnits: 'Could not reset units',
+    errSaveFields: 'Could not save sales form fields',
+    errSavePrint: 'Could not save print format',
+    loading: 'Loading…',
+    ok: 'OK',
     // Help tab
     needHelp: 'Need help?',
     needHelpHint: "Our team is here to help. Reach us on WhatsApp or Email — we'll respond as soon as possible.",
@@ -129,7 +144,8 @@ const t = {
     edit: 'ترمیم',
     delete: 'حذف',
     salesFormFields: 'سیلز فارم کے فیلڈز',
-    salesFormHint: 'تبدیلیاں خودکار محفوظ ہوتی ہیں۔',
+    salesFormHint: 'فیلڈز میں ترمیم کریں، پھر محفوظ کریں دبائیں۔',
+    unsavedChanges: 'غیر محفوظ تبدیلیاں',
     addField: 'نیا فیلڈ',
     englishLabel: 'انگریزی',
     urduLabel: 'اردو',
@@ -144,6 +160,17 @@ const t = {
     defaultFormatHint: 'نئے پرنٹ جاب اس فارمیٹ کے ساتھ کھلیں گے',
     availableFormats: 'دستیاب فارمیٹس',
     printInfo: 'آخری استعمال شدہ فارمیٹ خود بخود یاد رکھا جاتا ہے۔ یہ ڈیفالٹ صرف اس وقت استعمال ہوگا جب کوئی پچھلا فارمیٹ محفوظ نہ ہو۔',
+    errorTitle: 'حدث خطأ ما',
+    errLoadUnits: 'تعذر تحميل وحدات القياس',
+    errLoadFields: 'تعذر تحميل حقول نموذج المبيعات',
+    errLoadPrint: 'تعذر تحميل إعدادات الطباعة',
+    errSaveUnit: 'تعذر حفظ الوحدة',
+    errDeleteUnit: 'تعذر حذف الوحدة',
+    errResetUnits: 'تعذر إعادة ضبط الوحدات',
+    errSaveFields: 'تعذر حفظ حقول نموذج المبيعات',
+    errSavePrint: 'تعذر حفظ تنسيق الطباعة',
+    loading: 'جارٍ التحميل…',
+    ok: 'موافق',
     needHelp: 'مدد چاہیے؟',
     needHelpHint: 'ہماری ٹیم آپ کی مدد کے لیے تیار ہے۔ WhatsApp یا Email سے رابطہ کریں۔',
     contactWhatsApp: 'WhatsApp پر رابطہ',
@@ -192,7 +219,8 @@ const t = {
     edit: 'ترمیم',
     delete: 'حذف',
     salesFormFields: 'سیلز فارم کے فیلڈز',
-    salesFormHint: 'تبدیلیاں خودکار محفوظ ہوتی ہیں۔',
+    salesFormHint: 'فیلڈز میں ترمیم کریں، پھر محفوظ کریں دبائیں۔',
+    unsavedChanges: 'غیر محفوظ تبدیلیاں',
     addField: 'نیا فیلڈ',
     englishLabel: 'انگریزی',
     urduLabel: 'اردو',
@@ -207,6 +235,17 @@ const t = {
     defaultFormatHint: 'نئے پرنٹ جاب اس فارمیٹ کے ساتھ کھلیں گے',
     availableFormats: 'دستیاب فارمیٹس',
     printInfo: 'آخری استعمال شدہ فارمیٹ خود بخود یاد رکھا جاتا ہے۔ یہ ڈیفالٹ صرف اس وقت استعمال ہوگا جب کوئی پچھلا فارمیٹ محفوظ نہ ہو۔',
+    errorTitle: 'کچھ غلط ہو گیا',
+    errLoadUnits: 'پیمائش کے یونٹس لوڈ نہیں ہو سکے',
+    errLoadFields: 'سیلز فارم کے فیلڈز لوڈ نہیں ہو سکے',
+    errLoadPrint: 'پرنٹ کی ترتیبات لوڈ نہیں ہو سکیں',
+    errSaveUnit: 'یونٹ محفوظ نہیں ہو سکا',
+    errDeleteUnit: 'یونٹ حذف نہیں ہو سکا',
+    errResetUnits: 'یونٹس ری سیٹ نہیں ہو سکے',
+    errSaveFields: 'سیلز فارم کے فیلڈز محفوظ نہیں ہو سکے',
+    errSavePrint: 'پرنٹ فارمیٹ محفوظ نہیں ہو سکا',
+    loading: 'لوڈ ہو رہا ہے…',
+    ok: 'ٹھیک ہے',
     needHelp: 'مدد چاہیے؟',
     needHelpHint: 'ہماری ٹیم آپ کی مدد کے لیے تیار ہے۔ WhatsApp یا Email سے رابطہ کریں۔',
     contactWhatsApp: 'WhatsApp پر رابطہ',
@@ -255,7 +294,8 @@ const t = {
     edit: 'संपादित करें',
     delete: 'हटाएँ',
     salesFormFields: 'बिक्री फ़ॉर्म फ़ील्ड',
-    salesFormHint: 'परिवर्तन स्वचालित रूप से सहेजे जाते हैं।',
+    salesFormHint: 'फ़ील्ड संपादित करें, फिर सहेजें दबाएँ।',
+    unsavedChanges: 'बिना सहेजे परिवर्तन',
     addField: 'फ़ील्ड जोड़ें',
     englishLabel: 'अंग्रेज़ी',
     urduLabel: 'उर्दू',
@@ -270,6 +310,17 @@ const t = {
     defaultFormatHint: 'नए प्रिंट जॉब इस फ़ॉर्मेट के साथ खुलेंगे',
     availableFormats: 'उपलब्ध फ़ॉर्मेट',
     printInfo: 'अंतिम बार उपयोग किया गया फ़ॉर्मेट स्वचालित रूप से याद रखा जाता है। यह डिफ़ॉल्ट केवल तब उपयोग होगा जब कोई पिछला फ़ॉर्मेट सहेजा न गया हो।',
+    errorTitle: 'कुछ गलत हो गया',
+    errLoadUnits: 'मापने की इकाइयाँ लोड नहीं हो सकीं',
+    errLoadFields: 'बिक्री फ़ॉर्म फ़ील्ड लोड नहीं हो सके',
+    errLoadPrint: 'प्रिंट सेटिंग्स लोड नहीं हो सकीं',
+    errSaveUnit: 'इकाई सहेजी नहीं जा सकी',
+    errDeleteUnit: 'इकाई हटाई नहीं जा सकी',
+    errResetUnits: 'इकाइयाँ रीसेट नहीं हो सकीं',
+    errSaveFields: 'बिक्री फ़ॉर्म फ़ील्ड सहेजे नहीं जा सके',
+    errSavePrint: 'प्रिंट फ़ॉर्मेट सहेजा नहीं जा सका',
+    loading: 'लोड हो रहा है…',
+    ok: 'ठीक है',
     needHelp: 'सहायता चाहिए?',
     needHelpHint: 'हमारी टीम आपकी सहायता के लिए तैयार है। WhatsApp या Email से संपर्क करें।',
     contactWhatsApp: 'WhatsApp पर संपर्क करें',
@@ -296,7 +347,9 @@ type Translations = {
 };
 
 // ============================================================
-// 📏 MEASURING UNITS — DATA MODEL + STORAGE
+// 📏 MEASURING UNITS — DATA MODEL + LOCAL CACHE
+// (Backend is the source of truth; localStorage is the cache that
+//  the rest of the app reads from.)
 // ============================================================
 export type MeasuringUnit = {
   id: string;
@@ -362,7 +415,7 @@ export function setDefaultUnit(id: string): void {
 }
 
 // ============================================================
-// 🖨️ PRINT FORMAT — DATA MODEL + STORAGE
+// 🖨️ PRINT FORMAT — DATA MODEL + LOCAL CACHE
 // ============================================================
 export type PrintFormat = 'A4' | 'A5' | 'thermal80' | 'thermal58';
 
@@ -502,7 +555,117 @@ export function resolveInitialPrintFormat(): PrintFormat {
 }
 
 // ============================================================
-// COMPANY INFO
+// BACKEND HELPERS
+// ============================================================
+const pickUnit = (r: { id: string; name: string; label: string }): MeasuringUnit => ({
+  id: r.id,
+  name: r.name,
+  label: r.label,
+});
+
+/** Supabase throws plain objects (message/details/hint/code) */
+const describeError = (err: unknown): Omit<ErrorInfo, 'title'> => {
+  if (err && typeof err === 'object') {
+    const e = err as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+      status?: number;
+    };
+    const details = [
+      e.details,
+      e.hint ? `Hint: ${e.hint}` : '',
+      e.status ? `Status: ${e.status}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return {
+      message: e.message || JSON.stringify(err),
+      details: details || undefined,
+      code: e.code,
+    };
+  }
+  return { message: String(err) };
+};
+
+// Seeding runs once even if the page mounts twice (React StrictMode)
+let unitSeedPromise: Promise<void> | null = null;
+const seedUnitsOnce = (): Promise<void> => {
+  if (!unitSeedPromise) {
+    unitSeedPromise = (async () => {
+      for (const s of SEED_UNITS) {
+        await settingsService.addUnit({ name: s.name, label: s.label });
+      }
+    })().finally(() => {
+      unitSeedPromise = null;
+    });
+  }
+  return unitSeedPromise;
+};
+
+let fieldsSeedPromise: Promise<unknown> | null = null;
+const seedFieldsOnce = (fields: SalesFormField[]): Promise<unknown> => {
+  if (!fieldsSeedPromise) {
+    fieldsSeedPromise = settingsService
+      .saveSalesFormFields(fields)
+      .finally(() => {
+        fieldsSeedPromise = null;
+      });
+  }
+  return fieldsSeedPromise;
+};
+
+const loadUnitsFromBackend = async (): Promise<MeasuringUnit[]> => {
+  if (unitSeedPromise) await unitSeedPromise;
+  let rows = await settingsService.getUnits();
+  if (rows.length === 0) {
+    await seedUnitsOnce();
+    rows = await settingsService.getUnits();
+  }
+  return rows.map(pickUnit);
+};
+
+/**
+ * The backend table has no "key" column, so rows come back with UUID ids.
+ * The rest of the app may rely on the original field ids, so we keep the
+ * local ids by position when the structure matches.
+ */
+const reconcileFields = (
+  rows: DbSalesField[],
+  local: SalesFormField[]
+): SalesFormField[] => {
+  const base: SalesFormField[] | null =
+    local.length === rows.length
+      ? local
+      : DEFAULT_SALES_FORM_FIELDS.length === rows.length
+      ? DEFAULT_SALES_FORM_FIELDS
+      : null;
+  return rows.map((r, i) => {
+    const b = base ? base[i] : undefined;
+    return {
+      ...(b ?? {}),
+      id: (b?.id ?? r.id) as SalesFormFieldId,
+      label: r.label,
+      labelUr: r.labelUr,
+      required: r.required,
+    } as SalesFormField;
+  });
+};
+
+const loadFieldsFromBackend = async (): Promise<SalesFormField[]> => {
+  const local = loadSalesFormFields();
+  if (fieldsSeedPromise) await fieldsSeedPromise;
+  const rows = await settingsService.getSalesFormFields();
+  if (rows.length === 0 && local.length > 0) {
+    await seedFieldsOnce(local); // first run: push defaults to backend
+    return local;
+  }
+  return reconcileFields(rows, local);
+};
+
+// ============================================================
+// COMPANY INFO (static)
 // ============================================================
 const COMPANY_WHATSAPP = '923193236529';
 const COMPANY_EMAIL = 'nesticktech@gmail.com';
@@ -526,6 +689,8 @@ const ICON_PATHS = {
   edit: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z',
   ruler: 'M21.3 8.7 8.7 21.3c-.4.4-1 .4-1.4 0L2.7 16.7c-.4-.4-.4-1 0-1.4L15.3 2.7c.4-.4 1-.4 1.4 0l4.6 4.6c.4.4.4 1 0 1.4zM7.5 10.5l2-2M10.5 13.5l2-2M13.5 16.5l2-2',
   printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
+  alert: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  x: 'M18 6 6 18M6 6l12 12',
   whatsapp: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z',
 } as const;
 
@@ -555,6 +720,95 @@ const Icon = ({
 );
 
 // ============================================================
+// ERROR MODAL (backend errors popup)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: `${THEME.charcoal}80`, backdropFilter: 'blur(4px)' }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="rounded-2xl w-full max-w-md max-h-[92vh] flex flex-col shadow-xl"
+        style={{ background: THEME.warmIvory }}
+      >
+        <div
+          className="flex items-start justify-between gap-3 px-5 pt-5 pb-3"
+          style={{ borderBottom: `1px solid ${THEME.mutedOlive}20` }}
+        >
+          <h2 className="text-sm font-bold" style={{ color: THEME.deepForest }}>
+            {info.title}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-7 h-7 flex-shrink-0 rounded-full flex items-center justify-center cursor-pointer"
+            style={{
+              background: `${THEME.mutedOlive}15`,
+              color: THEME.mutedOlive,
+            }}
+          >
+            <Icon name="x" className="w-3 h-3" strokeWidth={2.5} />
+          </button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto">
+          <div className="flex items-start gap-2 mb-3">
+            <span className="mt-0.5" style={{ color: '#dc2626' }}>
+              <Icon name="alert" className="w-3.5 h-3.5" />
+            </span>
+            <p
+              className="text-[13px] font-semibold break-words"
+              style={{ color: THEME.charcoal }}
+            >
+              {info.message}
+            </p>
+          </div>
+          {(info.details || info.code) && (
+            <div
+              dir="ltr"
+              className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+              style={{
+                background: '#FFFFFF',
+                border: `1px solid ${THEME.mutedOlive}30`,
+                color: THEME.mutedOlive,
+              }}
+            >
+              {info.code ? `Code: ${info.code}\n` : ''}
+              {info.details}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className="w-full h-9 rounded-full text-[13px] font-bold cursor-pointer"
+            style={{ background: THEME.warmBrass, color: THEME.warmIvory }}
+          >
+            {okLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 export default function SettingsPage(): React.JSX.Element {
@@ -568,9 +822,15 @@ export default function SettingsPage(): React.JSX.Element {
     'language' | 'units' | 'salesForm' | 'print' | 'help'
   >('language');
 
+  const [loading, setLoading] = useState(true);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
+
+  // 📝 Sales form (draft is edited locally, saved with the Save button)
   const [salesFormFields, setSalesFormFields] = useState<SalesFormField[]>(
     loadSalesFormFields
   );
+  const [fieldsDirty, setFieldsDirty] = useState(false);
+  const [savingFields, setSavingFields] = useState(false);
 
   // 📏 Units state
   const [units, setUnits] = useState<MeasuringUnit[]>(() => loadUnits());
@@ -582,6 +842,7 @@ export default function SettingsPage(): React.JSX.Element {
   const [newUnitLabel, setNewUnitLabel] = useState('');
   const [addingUnit, setAddingUnit] = useState(false);
   const [unitError, setUnitError] = useState('');
+  const [unitsBusy, setUnitsBusy] = useState(false);
 
   // 🖨️ Print settings state
   const [defaultPrintFormat, setDefaultPrintFormatState] = useState<PrintFormat>(
@@ -590,17 +851,73 @@ export default function SettingsPage(): React.JSX.Element {
 
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    saveSalesFormFields(salesFormFields);
-  }, [salesFormFields]);
+  /** Logs to console AND shows the popup */
+  const reportError = (title: string, err: unknown): void => {
+    console.error(`[Settings] ${title}`, err);
+    setErrorInfo({ title, ...describeError(err) });
+  };
 
-  useEffect(() => {
-    saveUnits(units);
-  }, [units]);
+  /** State + localStorage cache (the rest of the app reads the cache) */
+  const syncUnits = (list: MeasuringUnit[]): void => {
+    setUnits(list);
+    saveUnits(list);
+    setDefaultUnitId((cur) =>
+      list.some((u) => u.id === cur) ? cur : list[0]?.id ?? cur
+    );
+  };
 
+  // Default unit has no backend column — it stays in localStorage only
   useEffect(() => {
     setDefaultUnit(defaultUnitId);
   }, [defaultUnitId]);
+
+  // Initial fetch: backend → state + localStorage
+  useEffect(() => {
+    let alive = true;
+    const load = async (): Promise<void> => {
+      const [unitsR, fieldsR, appR] = await Promise.allSettled([
+        loadUnitsFromBackend(),
+        loadFieldsFromBackend(),
+        settingsService.getAppSettings(),
+      ]);
+      if (!alive) return;
+
+      if (unitsR.status === 'fulfilled') {
+        if (unitsR.value.length > 0) syncUnits(unitsR.value);
+      } else {
+        reportError(tr.errLoadUnits, unitsR.reason);
+      }
+
+      if (fieldsR.status === 'fulfilled') {
+        setSalesFormFields(fieldsR.value);
+        saveSalesFormFields(fieldsR.value);
+        setFieldsDirty(false);
+      } else {
+        reportError(tr.errLoadFields, fieldsR.reason);
+      }
+
+      if (appR.status === 'fulfilled') {
+        const app = appR.value;
+        if (isValidPrintFormat(app.default_print_format)) {
+          setDefaultPrintFormatState(app.default_print_format);
+          saveDefaultPrintFormat(app.default_print_format);
+        }
+        // Local "last used" is written by the print flow — don't overwrite it
+        if (isValidPrintFormat(app.last_print_format) && !loadLastPrintFormat()) {
+          saveLastPrintFormat(app.last_print_format);
+        }
+      } else {
+        reportError(tr.errLoadPrint, appR.reason);
+      }
+
+      setLoading(false);
+    };
+    void load();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showSaved = (): void => {
     setSaved(true);
@@ -633,7 +950,9 @@ export default function SettingsPage(): React.JSX.Element {
     window.open(`mailto:${COMPANY_EMAIL}?subject=${subject}&body=${body}`, '_blank');
   };
 
-  // Sales Form handlers
+  // ============================================================
+  // 📝 SALES FORM HANDLERS
+  // ============================================================
   const updateSalesField = (
     id: SalesFormFieldId,
     key: 'label' | 'labelUr',
@@ -644,12 +963,12 @@ export default function SettingsPage(): React.JSX.Element {
         field.id === id ? { ...field, [key]: value } : field
       )
     );
-    showSaved();
+    setFieldsDirty(true);
   };
 
   const removeSalesField = (id: SalesFormFieldId): void => {
     setSalesFormFields((current) => current.filter((field) => field.id !== id));
-    showSaved();
+    setFieldsDirty(true);
   };
 
   const addSalesField = (): void => {
@@ -663,12 +982,27 @@ export default function SettingsPage(): React.JSX.Element {
       required: false,
     };
     setSalesFormFields((current) => [...current, newField]);
-    showSaved();
+    setFieldsDirty(true);
   };
 
   const resetSalesFormFields = (): void => {
     setSalesFormFields(DEFAULT_SALES_FORM_FIELDS.map((f) => ({ ...f })));
-    showSaved();
+    setFieldsDirty(true);
+  };
+
+  const persistSalesFields = async (): Promise<void> => {
+    if (savingFields) return;
+    setSavingFields(true);
+    try {
+      await settingsService.saveSalesFormFields(salesFormFields);
+      saveSalesFormFields(salesFormFields); // localStorage cache
+      setFieldsDirty(false);
+      showSaved();
+    } catch (err) {
+      reportError(tr.errSaveFields, err); // console + popup
+    } finally {
+      setSavingFields(false);
+    }
   };
 
   // ============================================================
@@ -698,7 +1032,8 @@ export default function SettingsPage(): React.JSX.Element {
     setUnitError('');
   };
 
-  const commitUnit = (): void => {
+  const commitUnit = async (): Promise<void> => {
+    if (unitsBusy) return;
     const name = newUnitName.trim().toLowerCase();
     const label = newUnitLabel.trim() || newUnitName.trim();
 
@@ -717,53 +1052,88 @@ export default function SettingsPage(): React.JSX.Element {
       return;
     }
 
-    if (addingUnit) {
-      const newUnit: MeasuringUnit = {
-        id: `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        name,
-        label,
-      };
-      setUnits((prev) => [...prev, newUnit]);
+    setUnitsBusy(true);
+    try {
+      if (addingUnit) {
+        const row = await settingsService.addUnit({ name, label });
+        syncUnits([...units, pickUnit(row)]);
+      } else if (editingUnit) {
+        const row = await settingsService.updateUnit(editingUnit.id, {
+          name,
+          label,
+        });
+        syncUnits(
+          units.map((u) => (u.id === editingUnit.id ? pickUnit(row) : u))
+        );
+      }
       showSaved();
-    } else if (editingUnit) {
-      setUnits((prev) =>
-        prev.map((u) =>
-          u.id === editingUnit.id ? { ...u, name, label } : u
-        )
-      );
-      showSaved();
+      cancelUnitForm();
+    } catch (err) {
+      reportError(tr.errSaveUnit, err); // console + popup
+    } finally {
+      setUnitsBusy(false);
     }
-
-    cancelUnitForm();
   };
 
-  const deleteUnit = (unit: MeasuringUnit): void => {
+  const deleteUnit = async (unit: MeasuringUnit): Promise<void> => {
+    if (unitsBusy) return;
     if (units.length <= 1) {
       setUnitError(tr.errUnitMin);
       return;
     }
-    if (defaultUnitId === unit.id) {
-      const next = units.find((u) => u.id !== unit.id);
-      if (next) setDefaultUnitId(next.id);
+    setUnitsBusy(true);
+    try {
+      await settingsService.deleteUnit(unit.id);
+      syncUnits(units.filter((u) => u.id !== unit.id));
+      showSaved();
+    } catch (err) {
+      reportError(tr.errDeleteUnit, err); // console + popup
+    } finally {
+      setUnitsBusy(false);
     }
-    setUnits((prev) => prev.filter((u) => u.id !== unit.id));
-    showSaved();
   };
 
-  const resetUnits = (): void => {
-    const fresh = SEED_UNITS.map((u) => ({ ...u }));
-    setUnits(fresh);
-    setDefaultUnitId(fresh[0].id);
-    showSaved();
+  const resetUnits = async (): Promise<void> => {
+    if (unitsBusy) return;
+    setUnitsBusy(true);
+    try {
+      for (const u of units) await settingsService.deleteUnit(u.id);
+      for (const s of SEED_UNITS) {
+        await settingsService.addUnit({ name: s.name, label: s.label });
+      }
+      const fresh = (await settingsService.getUnits()).map(pickUnit);
+      syncUnits(fresh);
+      if (fresh[0]) setDefaultUnitId(fresh[0].id);
+      cancelUnitForm();
+      showSaved();
+    } catch (err) {
+      reportError(tr.errResetUnits, err); // console + popup
+      try {
+        // Re-sync with whatever the backend actually has now
+        const current = (await settingsService.getUnits()).map(pickUnit);
+        if (current.length > 0) syncUnits(current);
+      } catch (syncErr) {
+        console.error('[Settings] re-sync after failed reset', syncErr);
+      }
+    } finally {
+      setUnitsBusy(false);
+    }
   };
 
   // ============================================================
   // 🖨️ PRINT HANDLERS
   // ============================================================
-  const changePrintFormat = (format: PrintFormat): void => {
-    setDefaultPrintFormatState(format);
-    saveDefaultPrintFormat(format);
-    showSaved();
+  const changePrintFormat = async (format: PrintFormat): Promise<void> => {
+    const previous = defaultPrintFormat;
+    setDefaultPrintFormatState(format); // optimistic
+    try {
+      await settingsService.savePrintFormat(format);
+      saveDefaultPrintFormat(format); // localStorage cache
+      showSaved();
+    } catch (err) {
+      setDefaultPrintFormatState(previous);
+      reportError(tr.errSavePrint, err); // console + popup
+    }
   };
 
   // ============================================================
@@ -789,6 +1159,8 @@ export default function SettingsPage(): React.JSX.Element {
     [units, defaultUnitId]
   );
 
+  const unitsLocked = loading || unitsBusy;
+
   return (
     <div
       dir={isRTL ? 'rtl' : 'ltr'}
@@ -803,7 +1175,7 @@ export default function SettingsPage(): React.JSX.Element {
             {tr.settingsTitle}
           </h1>
           <p className="mt-0.5 text-[11px]" style={{ color: THEME.mutedOlive }}>
-            {tr.settingsSubtitle}
+            {loading ? tr.loading : tr.settingsSubtitle}
           </p>
         </div>
 
@@ -981,8 +1353,9 @@ export default function SettingsPage(): React.JSX.Element {
               </div>
               <button
                 type="button"
-                onClick={resetUnits}
-                className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition"
+                onClick={() => void resetUnits()}
+                disabled={unitsLocked}
+                className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   border: `2px solid ${THEME.mutedOlive}30`,
                   color: THEME.warmBrass,
@@ -1085,8 +1458,9 @@ export default function SettingsPage(): React.JSX.Element {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={commitUnit}
-                    className="h-8 rounded-full px-4 text-[11px] font-bold"
+                    onClick={() => void commitUnit()}
+                    disabled={unitsBusy}
+                    className="h-8 rounded-full px-4 text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ backgroundColor: THEME.deepForest, color: THEME.warmIvory }}
                   >
                     {tr.save}
@@ -1094,7 +1468,8 @@ export default function SettingsPage(): React.JSX.Element {
                   <button
                     type="button"
                     onClick={cancelUnitForm}
-                    className="h-8 rounded-full px-4 text-[11px] font-bold"
+                    disabled={unitsBusy}
+                    className="h-8 rounded-full px-4 text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{
                       border: `2px solid ${THEME.mutedOlive}30`,
                       color: THEME.mutedOlive,
@@ -1107,6 +1482,13 @@ export default function SettingsPage(): React.JSX.Element {
               </div>
             )}
 
+            {/* min-units error when no form is open */}
+            {!addingUnit && !editingUnit && unitError && (
+              <p className="mb-2 text-[10px] font-semibold" style={{ color: THEME.warmBrass }}>
+                {unitError}
+              </p>
+            )}
+
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: THEME.mutedOlive }}>
                 {tr.unitsList} ({units.length})
@@ -1115,7 +1497,8 @@ export default function SettingsPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={startAddUnit}
-                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold"
+                  disabled={unitsLocked}
+                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ backgroundColor: THEME.warmBrass, color: THEME.warmIvory }}
                 >
                   <Icon name="plus" className="w-3 h-3" strokeWidth={2.5} />
@@ -1159,8 +1542,9 @@ export default function SettingsPage(): React.JSX.Element {
                       <button
                         type="button"
                         onClick={() => startEditUnit(u)}
+                        disabled={unitsLocked}
                         title={tr.edit}
-                        className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition"
+                        className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{
                           backgroundColor: 'rgba(196,154,90,0.15)',
                           color: THEME.warmBrass,
@@ -1170,8 +1554,8 @@ export default function SettingsPage(): React.JSX.Element {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteUnit(u)}
-                        disabled={units.length <= 1}
+                        onClick={() => void deleteUnit(u)}
+                        disabled={unitsLocked || units.length <= 1}
                         title={tr.delete}
                         className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{
@@ -1209,13 +1593,19 @@ export default function SettingsPage(): React.JSX.Element {
                 </h2>
                 <p className="mt-0.5 text-[10px]" style={{ color: THEME.mutedOlive }}>
                   {tr.salesFormHint}
+                  {fieldsDirty && (
+                    <span className="font-bold" style={{ color: THEME.warmBrass }}>
+                      {' '}· {tr.unsavedChanges}
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={addSalesField}
-                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition"
+                  disabled={loading || savingFields}
+                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ backgroundColor: THEME.warmBrass, color: THEME.warmIvory }}
                 >
                   <Icon name="plus" className="w-3 h-3" strokeWidth={2.5} />
@@ -1224,7 +1614,8 @@ export default function SettingsPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={resetSalesFormFields}
-                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition"
+                  disabled={loading || savingFields}
+                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     border: `2px solid ${THEME.mutedOlive}30`,
                     color: THEME.warmBrass,
@@ -1232,6 +1623,16 @@ export default function SettingsPage(): React.JSX.Element {
                 >
                   <Icon name="refresh" className="w-3 h-3" />
                   {tr.reset}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void persistSalesFields()}
+                  disabled={loading || savingFields || !fieldsDirty}
+                  className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: THEME.deepForest, color: THEME.warmIvory }}
+                >
+                  <Icon name="save" className="w-3 h-3" />
+                  {tr.save}
                 </button>
               </div>
             </div>
@@ -1293,7 +1694,8 @@ export default function SettingsPage(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => removeSalesField(field.id)}
-                      className="flex h-8 items-center gap-1 rounded-full px-3 text-[10px] font-bold transition"
+                      disabled={savingFields}
+                      className="flex h-8 items-center gap-1 rounded-full px-3 text-[10px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: 'rgba(196,154,90,0.15)',
                         color: THEME.charcoal,
@@ -1353,8 +1755,9 @@ export default function SettingsPage(): React.JSX.Element {
               </div>
               <button
                 type="button"
-                onClick={() => changePrintFormat(DEFAULT_PRINT_FORMAT)}
-                className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition"
+                onClick={() => void changePrintFormat(DEFAULT_PRINT_FORMAT)}
+                disabled={loading}
+                className="flex items-center gap-1 h-8 rounded-full px-3 text-[11px] font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   border: `2px solid ${THEME.mutedOlive}30`,
                   color: THEME.warmBrass,
@@ -1380,8 +1783,11 @@ export default function SettingsPage(): React.JSX.Element {
               </label>
               <select
                 value={defaultPrintFormat}
-                onChange={(e) => changePrintFormat(e.target.value as PrintFormat)}
-                className="w-full h-10 px-4 rounded-full border-2 text-[12px] cursor-pointer focus:outline-none"
+                disabled={loading}
+                onChange={(e) =>
+                  void changePrintFormat(e.target.value as PrintFormat)
+                }
+                className="w-full h-10 px-4 rounded-full border-2 text-[12px] cursor-pointer focus:outline-none disabled:opacity-60"
                 style={{
                   borderColor: `${THEME.mutedOlive}30`,
                   backgroundColor: THEME.warmIvory,
@@ -1438,7 +1844,8 @@ export default function SettingsPage(): React.JSX.Element {
                         type="radio"
                         name="defaultPrintFormat"
                         checked={active}
-                        onChange={() => changePrintFormat(f.id)}
+                        disabled={loading}
+                        onChange={() => void changePrintFormat(f.id)}
                         className="w-4 h-4 cursor-pointer"
                         style={{ accentColor: THEME.warmBrass }}
                       />
@@ -1483,7 +1890,7 @@ export default function SettingsPage(): React.JSX.Element {
       )}
 
       {/* ============================================
-          TAB: HELP & SUPPORT
+          TAB: HELP & SUPPORT (static)
       ============================================ */}
       {activeTab === 'help' && (
         <div className="max-w-2xl space-y-4">
@@ -1663,6 +2070,14 @@ export default function SettingsPage(): React.JSX.Element {
             </div>
           </div>
         </div>
+      )}
+
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
+        />
       )}
     </div>
   );

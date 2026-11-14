@@ -2,24 +2,15 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  accountingService,
+  type AccountingTransaction,
+  type RealInvoice,
+} from '@renderer/services/accountingservice';
 import AccountingDashboard from './AccountingDashboard';
 import AccountingCharts from './AccountingCharts';
-
-// ============================================================
-// 🎨 THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-  success: '#3B7A57',
-  danger: '#B85C4A',
-  purple: '#8A6A9E',
-  pink: '#C26B80',
-};
 
 // ============================================================
 // TYPES
@@ -27,30 +18,8 @@ const THEME = {
 export type TransactionType = 'In' | 'Out' | 'Return';
 export type PaymentMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
 
-export type Transaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  invoiceFile?: string;
-  invoiceFileName?: string;
-  type: TransactionType;
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Returned'; // ✅ 'Pending' removed
-  mode: PaymentMode;
-  linkedInvoiceId?: string;
-  sourceDocumentId?: string;
-  sourceModule?: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-  createdAt: string;
-  hasReturn?: boolean;
-  returnTransactionId?: string;
-  originalTransactionId?: string;
-  returnNumber?: string;
-};
-
+// ✅ Ab Transaction type service se aati hai (single source of truth)
+export type Transaction = AccountingTransaction;
 type TxnStatus = Transaction['status'];
 
 // ============================================================
@@ -165,7 +134,6 @@ const t = {
     typeReturn: 'Return',
     statusPaid: 'Paid',
     statusPartial: 'Partially Paid',
-    // ✅ statusPending removed
     statusReturned: 'Returned',
     fieldCustomerName: 'Customer Name',
     fieldCompanyName: 'Company Name',
@@ -193,6 +161,11 @@ const t = {
     createdBy: 'Created By',
     close: 'Close',
     invoiceNotFound: 'Invoice details not available — the source document may have been deleted.',
+    loading: 'Loading...',
+    loadError: 'Could not load transactions. Check your connection and try again.',
+    saving: 'Saving...',
+    saveFailed: 'Could not save the entry. Please try again.',
+    retry: 'Retry',
   },
   ar: {
     pageTitle: 'المحاسبة',
@@ -327,6 +300,11 @@ const t = {
     createdBy: 'أنشأها',
     close: 'إغلاق',
     invoiceNotFound: 'تفاصيل الفاتورة غير متوفرة — قد يكون المستند المصدر محذوفاً.',
+    loading: 'جارٍ التحميل...',
+    loadError: 'تعذر تحميل المعاملات. تحقق من الاتصال وحاول مرة أخرى.',
+    saving: 'جارٍ الحفظ...',
+    saveFailed: 'تعذر حفظ القيد. حاول مرة أخرى.',
+    retry: 'إعادة المحاولة',
   },
   ur: {
     pageTitle: 'اکاؤنٹنگ',
@@ -461,6 +439,11 @@ const t = {
     createdBy: 'بنایا',
     close: 'بند کریں',
     invoiceNotFound: 'انوائس کی تفصیلات دستیاب نہیں — ماخذ دستاویز حذف ہو سکتی ہے۔',
+    loading: 'لوڈ ہو رہا ہے...',
+    loadError: 'لین دین لوڈ نہیں ہو سکا۔ کنکشن چیک کریں اور دوبارہ کوشش کریں۔',
+    saving: 'محفوظ ہو رہا ہے...',
+    saveFailed: 'اندراج محفوظ نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
+    retry: 'دوبارہ کوشش کریں',
   },
   hi: {
     pageTitle: 'लेखांकन',
@@ -595,6 +578,11 @@ const t = {
     createdBy: 'बनाया',
     close: 'बंद करें',
     invoiceNotFound: 'चालान विवरण उपलब्ध नहीं — स्रोत दस्तावेज़ हटाया गया हो सकता है।',
+    loading: 'लोड हो रहा है...',
+    loadError: 'लेनदेन लोड नहीं हो सके। कनेक्शन जाँचें और फिर कोशिश करें।',
+    saving: 'सहेजा जा रहा है...',
+    saveFailed: 'प्रविष्टि सहेजी नहीं जा सकी। फिर कोशिश करें।',
+    retry: 'पुनः प्रयास',
   },
 } as const;
 
@@ -604,6 +592,7 @@ type Translations = {
     : string;
 };
 
+// Language abhi bhi login ke waqt save hue user se aati hai
 const getStoredLanguage = (): Language => {
   try {
     const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
@@ -664,225 +653,17 @@ const printHtmlDocument = (html: string): void => {
   }, 400);
 };
 
-// ============================================================
-// STORAGE
-// ============================================================
-export const TRANSACTIONS_STORAGE_KEY = 'zakhira_transactions';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
+const escapeHtml = (s: string): string =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
+// ============================================================
+// HANDOFF (Sales page se "is transaction ko dikhao")
+// ============================================================
 const HANDOFF_VIEW_TXN_KEY = 'zakhira_accounting_view_txn';
-
-// ✅ MIGRATION: Purane 'Pending' transactions → 'Partially Paid'
-const migratePendingToPartial = (): void => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    if (!raw) return;
-    const list = JSON.parse(raw);
-    if (!Array.isArray(list)) return;
-
-    let changed = false;
-    const updated = list.map((t: { status?: string }) => {
-      if (t.status === 'Pending') {
-        changed = true;
-        return { ...t, status: 'Partially Paid' };
-      }
-      return t;
-    });
-
-    if (changed) {
-      localStorage.setItem(
-        TRANSACTIONS_STORAGE_KEY,
-        JSON.stringify(updated)
-      );
-    }
-  } catch {
-    /* ignore */
-  }
-};
-
-const loadTransactions = (): Transaction[] => {
-  try {
-    migratePendingToPartial(); // ✅ Auto-migrate
-    const raw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveTransactions = (list: Transaction[]): void => {
-  try {
-    localStorage.setItem(TRANSACTIONS_STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
-};
-
-// ============================================================
-// 📄 REAL INVOICE / SALES DOCS
-// ============================================================
-type SalesDocLine = {
-  id: string;
-  material?: string;
-  quantity?: number;
-  unitPrice?: number;
-  lineTotal?: number;
-  costPrice?: number;
-  discountType?: string;
-  discountValue?: number;
-};
-
-type SalesDocument = {
-  id: string;
-  documentType?: string;
-  orderNumber: string;
-  status?: string;
-  issueDate?: string;
-  createdAt?: string;
-  notes?: string;
-  vatNumber?: string;
-  vatRate?: number;
-  subtotal?: number;
-  discountTotal?: number;
-  taxTotal?: number;
-  grandTotal?: number;
-  createdBy?: string;
-  customerSnapshot?: {
-    name?: string;
-    company?: string;
-    phone?: string;
-    address?: string;
-    city?: string;
-  };
-  lines?: SalesDocLine[];
-};
-
-// ============================================================
-// AUTO-FIX: Sync orphan returns into invoices
-// ============================================================
-type DocumentRecordMin = {
-  id: string;
-  orderNumber: string;
-  returnRecords?: Array<{
-    returnId: string;
-    returnNumber: string;
-    date: string;
-    reason: string;
-    notes?: string;
-    items: unknown[];
-    totalReturnAmount: number;
-    linkedTransactionId: string;
-    createdBy: string;
-    createdAt: string;
-  }>;
-};
-
-const autoSyncReturnsIntoInvoices = (): void => {
-  try {
-    const txnsRaw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    const docsRaw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!txnsRaw || !docsRaw) return;
-
-    const txns: Transaction[] = JSON.parse(txnsRaw);
-    const docs: DocumentRecordMin[] = JSON.parse(docsRaw);
-
-    const returnTxns = txns.filter(
-      (t) => t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned')
-    );
-    if (returnTxns.length === 0) return;
-
-    let docsChanged = false;
-    let txnsChanged = false;
-    const updatedTxns = [...txns];
-
-    for (const retTxn of returnTxns) {
-      const invoice = docs.find((d) => d.orderNumber === retTxn.invoiceRef);
-      if (!invoice) continue;
-
-      const existingReturn = (invoice.returnRecords || []).find(
-        (r) => r.linkedTransactionId === retTxn.transactionNo
-      );
-      if (existingReturn) {
-        const txnIdx = updatedTxns.findIndex((t) => t.id === retTxn.id);
-        if (txnIdx >= 0 && !updatedTxns[txnIdx].linkedInvoiceId) {
-          const origTxn = updatedTxns.find(
-            (t) => t.type === 'In' && t.invoiceRef === retTxn.invoiceRef
-          );
-          updatedTxns[txnIdx] = {
-            ...updatedTxns[txnIdx],
-            linkedInvoiceId: invoice.id,
-            originalTransactionId:
-              origTxn?.transactionNo ||
-              updatedTxns[txnIdx].originalTransactionId,
-          };
-          txnsChanged = true;
-        }
-        continue;
-      }
-
-      const newReturn = {
-        returnId: `ret-auto-${retTxn.id}`,
-        returnNumber:
-          retTxn.returnNumber ||
-          `RET-AUTO-${retTxn.transactionNo.replace('TXN-', '')}`,
-        date: retTxn.date,
-        reason:
-          retTxn.notes?.replace(/^Return[^:]*:\s*/, '') || 'Auto-synced return',
-        notes: retTxn.notes,
-        items: [],
-        totalReturnAmount: retTxn.amount,
-        linkedTransactionId: retTxn.transactionNo,
-        createdBy: 'System (auto-sync)',
-        createdAt: retTxn.createdAt,
-      };
-
-      if (!invoice.returnRecords) invoice.returnRecords = [];
-      invoice.returnRecords.push(newReturn);
-      docsChanged = true;
-
-      const txnIdx = updatedTxns.findIndex((t) => t.id === retTxn.id);
-      if (txnIdx >= 0 && !updatedTxns[txnIdx].linkedInvoiceId) {
-        const origTxn = updatedTxns.find(
-          (t) => t.type === 'In' && t.invoiceRef === retTxn.invoiceRef
-        );
-        updatedTxns[txnIdx] = {
-          ...updatedTxns[txnIdx],
-          linkedInvoiceId: invoice.id,
-          originalTransactionId:
-            origTxn?.transactionNo || updatedTxns[txnIdx].originalTransactionId,
-        };
-        txnsChanged = true;
-      }
-    }
-
-    if (docsChanged)
-      localStorage.setItem(DOCUMENTS_KEY, JSON.stringify(docs));
-    if (txnsChanged)
-      localStorage.setItem(
-        TRANSACTIONS_STORAGE_KEY,
-        JSON.stringify(updatedTxns)
-      );
-  } catch {
-    /* ignore */
-  }
-};
-
-const loadRealInvoice = (invoiceIdOrRef: string): SalesDocument | null => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return null;
-    const list = JSON.parse(raw);
-    if (!Array.isArray(list)) return null;
-    const found =
-      list.find((d: SalesDocument) => d.id === invoiceIdOrRef) ||
-      list.find((d: SalesDocument) => d.orderNumber === invoiceIdOrRef);
-    return found || null;
-  } catch {
-    return null;
-  }
-};
 
 // ============================================================
 // CONSTANTS
@@ -1046,20 +827,6 @@ const formatDate = (iso: string, lang: Language = 'en'): string => {
   }
 };
 
-const uid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const genTxnNo = (existing: Transaction[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `TXN-${year}-`;
-  const numbers = existing
-    .filter((t) => t.transactionNo.startsWith(prefix))
-    .map((t) => Number(t.transactionNo.split('-')[2]))
-    .filter((n) => !Number.isNaN(n));
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-};
-
 // 🎨 TYPE TONE
 type Tone = {
   bg: string;
@@ -1098,7 +865,6 @@ const getTypeTone = (type: TransactionType): Tone => {
 const typeLabel = (t: TransactionType, tr: Translations): string =>
   t === 'In' ? tr.typeIn : t === 'Out' ? tr.typeOut : tr.typeReturn;
 
-// ✅ Pending case removed
 const statusLabel = (s: TxnStatus, tr: Translations): string =>
   s === 'Paid'
     ? tr.statusPaid
@@ -1106,7 +872,6 @@ const statusLabel = (s: TxnStatus, tr: Translations): string =>
       ? tr.statusPartial
       : tr.statusReturned;
 
-// ✅ Pending tone removed
 const getStatusTone = (s: TxnStatus): Tone => {
   if (s === 'Paid')
     return {
@@ -1152,15 +917,19 @@ const isWithinMonths = (iso: string, months: number): boolean => {
 const isReturnEntry = (t: Transaction): boolean =>
   t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned');
 
-// ✅ Return kis original "In" entry ki hai — sirf usi par "HAS RETURN" dikhega
+// ✅ Kaun si original "In" entry ki return hui hai — sirf usi par "HAS RETURN"
 const getReturnOwnerIds = (all: Transaction[]): Set<string> => {
   const ids = new Set<string>();
+
+  // DB flag (has_return) — service se aata hai
+  for (const t of all) {
+    if (t.type === 'In' && t.hasReturn) ids.add(t.id);
+  }
+
   for (const r of all.filter(isReturnEntry)) {
-    // 1) Pehle return mein saved originalTransactionId se dhoondo
     let owner = all.find(
       (t) => t.type === 'In' && t.transactionNo === r.originalTransactionId
     );
-    // 2) Na mile to same invoice ki sabse pehli In entry
     if (!owner && r.invoiceRef && r.invoiceRef !== '—') {
       owner = all
         .filter((t) => t.type === 'In' && t.invoiceRef === r.invoiceRef)
@@ -1172,6 +941,23 @@ const getReturnOwnerIds = (all: Transaction[]): Set<string> => {
     if (owner) ids.add(owner.id);
   }
   return ids;
+};
+
+const matchesDatePreset = (iso: string, preset: DatePreset): boolean => {
+  switch (preset) {
+    case '7d':
+      return isWithinDays(iso, 7);
+    case '30d':
+      return isWithinDays(iso, 30);
+    case '3m':
+      return isWithinMonths(iso, 3);
+    case '6m':
+      return isWithinMonths(iso, 6);
+    case '1y':
+      return isWithinMonths(iso, 12);
+    default:
+      return true;
+  }
 };
 
 // ============================================================
@@ -1324,12 +1110,6 @@ function StatCard({
     amber: THEME.warmBrass,
     neutral: THEME.warmBrass,
   };
-  const toneTexts: Record<typeof tone, string> = {
-    green: THEME.deepForest,
-    red: THEME.charcoal,
-    amber: THEME.warmBrass,
-    neutral: THEME.warmBrass,
-  };
 
   return (
     <button
@@ -1355,7 +1135,7 @@ function StatCard({
       <div className="min-w-0 flex-1">
         <p
           className="text-sm font-bold truncate"
-          style={{ color: toneTexts[tone] }}
+          style={{ color: toneColors[tone] }}
         >
           {value}
         </p>
@@ -1379,20 +1159,55 @@ function StatCard({
 }
 
 // ============================================================
-// REAL INVOICE MODAL
+// REAL INVOICE MODAL  (ab Supabase se async load hota hai)
 // ============================================================
 function RealInvoiceModal({
-  invoiceIdOrRef,
+  invoiceId,
+  orderNumber,
   tr,
   lang,
   onClose,
 }: {
-  invoiceIdOrRef: string;
+  invoiceId?: string;
+  orderNumber?: string;
   tr: Translations;
   lang: Language;
   onClose: () => void;
 }): React.JSX.Element {
-  const doc = useMemo(() => loadRealInvoice(invoiceIdOrRef), [invoiceIdOrRef]);
+  // undefined = loading, null = not found
+  const [doc, setDoc] = useState<RealInvoice | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(undefined);
+    accountingService
+      .getRealInvoice(invoiceId, orderNumber)
+      .then((d) => {
+        if (!cancelled) setDoc(d);
+      })
+      .catch((e) => {
+        console.error('getRealInvoice failed', e);
+        if (!cancelled) setDoc(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceId, orderNumber]);
+
+  if (doc === undefined) {
+    return (
+      <Modal
+        title={tr.realInvoiceDetails}
+        onClose={onClose}
+        maxWidth="max-w-md"
+        zIndex={70}
+      >
+        <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
+          {tr.loading}
+        </p>
+      </Modal>
+    );
+  }
 
   if (!doc) {
     return (
@@ -1829,7 +1644,7 @@ function InvoicePickerModal({
 }
 
 // ============================================================
-// NEW ENTRY MODAL
+// NEW ENTRY MODAL  (ab accountingService.createTransaction use karta hai)
 // ============================================================
 function NewEntryModal({
   onClose,
@@ -1839,7 +1654,7 @@ function NewEntryModal({
   lang,
 }: {
   onClose: () => void;
-  onSaved: (t: Transaction) => void;
+  onSaved: () => void;
   existing: Transaction[];
   tr: Translations;
   lang: Language;
@@ -1856,6 +1671,7 @@ function NewEntryModal({
   const [mode, setMode] = useState<PaymentMode>('Cash');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const [linkedInvoice, setLinkedInvoice] = useState<Transaction | null>(null);
   const [showInvoicePicker, setShowInvoicePicker] = useState(false);
@@ -1885,7 +1701,8 @@ function NewEntryModal({
     reader.readAsDataURL(f);
   };
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     if (!customerName.trim()) return setError(tr.errCustomer);
     if (!amount || Number(amount) <= 0) return setError(tr.errAmount);
     if (!date) return setError(tr.errDate);
@@ -1893,52 +1710,39 @@ function NewEntryModal({
       return setError(tr.errLinkInvoice);
     }
 
-    const newTxn: Transaction = {
-      id: uid('txn'),
-      transactionNo: genTxnNo(existing),
-      date,
-      customerName: customerName.trim(),
-      companyName: companyName.trim(),
-      invoiceRef:
-        type === 'Return' && linkedInvoice
-          ? linkedInvoice.invoiceRef
-          : invoiceRef.trim() || '—',
-      invoiceFile: invoiceFile || undefined,
-      invoiceFileName: invoiceFileName || undefined,
-      type,
-      amount: Number(amount),
-      status: type === 'Return' ? 'Returned' : status,
-      mode,
-      linkedInvoiceId:
-        type === 'Return' && linkedInvoice
-          ? linkedInvoice.linkedInvoiceId ||
-            linkedInvoice.sourceDocumentId ||
-            linkedInvoice.id
-          : undefined,
-      originalTransactionId:
-        type === 'Return' && linkedInvoice
-          ? linkedInvoice.transactionNo
-          : undefined,
-      sourceModule: 'manual',
-      notes: notes.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    if (type === 'Return' && linkedInvoice) {
-      const all = loadTransactions();
-      const updated = all.map((t) =>
-        t.id === linkedInvoice.id
-          ? {
-              ...t,
-              hasReturn: true,
-              returnTransactionId: newTxn.transactionNo,
-            }
-          : t
-      );
-      saveTransactions([newTxn, ...updated]);
+    setSaving(true);
+    setError('');
+    try {
+      await accountingService.createTransaction({
+        type,
+        date,
+        customerName: customerName.trim(),
+        companyName: companyName.trim() || undefined,
+        invoiceRef:
+          type === 'Return' && linkedInvoice
+            ? linkedInvoice.invoiceRef
+            : invoiceRef.trim() || undefined,
+        invoiceFile: invoiceFile || undefined,
+        invoiceFileName: invoiceFileName || undefined,
+        amount: Number(amount),
+        status: type === 'Return' ? 'Returned' : status,
+        mode,
+        notes: notes.trim() || undefined,
+        originalTransactionDbId:
+          type === 'Return' && linkedInvoice ? linkedInvoice.id : undefined,
+        salesDocumentId:
+          type === 'Return' && linkedInvoice
+            ? linkedInvoice.sourceDocumentId ||
+              linkedInvoice.linkedInvoiceId ||
+              undefined
+            : undefined,
+      });
+      onSaved();
+    } catch (e) {
+      console.error('createTransaction failed', e);
+      setError(tr.saveFailed);
+      setSaving(false);
     }
-
-    onSaved(newTxn);
   };
 
   return (
@@ -2158,7 +1962,6 @@ function NewEntryModal({
                   <>
                     <option value="Paid">{tr.statusPaid}</option>
                     <option value="Partially Paid">{tr.statusPartial}</option>
-                    {/* ✅ Pending option removed */}
                   </>
                 )}
               </select>
@@ -2225,16 +2028,18 @@ function NewEntryModal({
             style={{ borderColor: 'rgba(102,116,90,0.1)' }}
           >
             <button
-              onClick={submit}
+              onClick={() => void submit()}
+              disabled={saving}
               className={primaryBtn}
               style={primaryBtnStyle}
             >
               {Icons.check}
-              <span>{tr.saveEntry}</span>
+              <span>{saving ? tr.saving : tr.saveEntry}</span>
             </button>
             <button
               onClick={onClose}
-              className={ghostBtn}
+              disabled={saving}
+              className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}
               style={ghostBtnStyle}
             >
               {tr.cancel}
@@ -2277,14 +2082,13 @@ function TransactionDetailsModal({
   txn: Transaction;
   all: Transaction[];
   onClose: () => void;
-  onNavigateToInvoice: (invoiceId: string) => void;
+  onNavigateToInvoice: (invoiceId: string | undefined, orderNumber: string) => void;
   onNavigateToTxn: (txnNo: string) => void;
   tr: Translations;
   lang: Language;
 }): React.JSX.Element {
   const tone = getTypeTone(txn.type);
   const isReturn = isReturnEntry(txn);
-  // ✅ Sirf asli invoice entry par HAS RETURN / linked returns dikhengi
   const isReturnOwner = getReturnOwnerIds(all).has(txn.id);
 
   const originalInvoiceTxn = txn.linkedInvoiceId
@@ -2507,9 +2311,9 @@ function TransactionDetailsModal({
               type="button"
               onClick={() =>
                 onNavigateToInvoice(
-                  linkedInvoice.linkedInvoiceId ||
-                    linkedInvoice.sourceDocumentId ||
-                    linkedInvoice.id
+                  linkedInvoice.sourceDocumentId ||
+                    linkedInvoice.linkedInvoiceId,
+                  linkedInvoice.invoiceRef
                 )
               }
               className="w-full text-left rounded-xl p-3 cursor-pointer transition border-2"
@@ -2690,10 +2494,9 @@ export default function AccountingPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    autoSyncReturnsIntoInvoices();
-    return loadTransactions();
-  });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const [mainTab, setMainTab] = useState<MainTab>('All');
   const [search, setSearch] = useState('');
@@ -2705,103 +2508,131 @@ export default function AccountingPage(): React.JSX.Element {
 
   const [showNewEntry, setShowNewEntry] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [viewTxn, setViewTxn] = useState<Transaction | null>(null);
   const [copiedId, setCopiedId] = useState<string>('');
 
-  const [viewRealInvoiceId, setViewRealInvoiceId] = useState<string | null>(
-    null
+  const [viewRealInvoice, setViewRealInvoice] = useState<{
+    id?: string;
+    ref?: string;
+  } | null>(null);
+
+  // ----------------------------------------------------------
+  // DATA LOADING (Supabase via accountingService)
+  // ----------------------------------------------------------
+  const reload = useCallback(
+    async (silent = false): Promise<Transaction[] | null> => {
+      if (!silent) setLoading(true);
+      try {
+        const list = await accountingService.getTransactions();
+        setTransactions(list);
+        setLoadError('');
+        return list;
+      } catch (e) {
+        console.error('getTransactions failed', e);
+        setLoadError(tr.loadError);
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [tr]
   );
 
+  // First load + handoff (Sales page se aaya hua txn kholna)
   useEffect(() => {
-    try {
-      const handoff = localStorage.getItem(HANDOFF_VIEW_TXN_KEY);
-      if (handoff) {
-        localStorage.removeItem(HANDOFF_VIEW_TXN_KEY);
-        const all = loadTransactions();
-        const found = all.find((t) => t.transactionNo === handoff);
-        if (found) setViewTxn(found);
+    void reload().then((list) => {
+      if (!list) return;
+      try {
+        const handoff = localStorage.getItem(HANDOFF_VIEW_TXN_KEY);
+        if (handoff) {
+          localStorage.removeItem(HANDOFF_VIEW_TXN_KEY);
+          const found = list.find((x) => x.transactionNo === handoff);
+          if (found) setViewTxn(found);
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Focus / sales update par silent refresh
   useEffect(() => {
-    const reload = (): void => {
-      setTransactions(loadTransactions());
+    const onRefresh = (): void => {
+      void reload(true);
     };
-    window.addEventListener('focus', reload);
-    window.addEventListener('zakhira:sales-updated', reload as EventListener);
+    window.addEventListener('focus', onRefresh);
+    window.addEventListener('zakhira:sales-updated', onRefresh as EventListener);
     return () => {
-      window.removeEventListener('focus', reload);
+      window.removeEventListener('focus', onRefresh);
       window.removeEventListener(
         'zakhira:sales-updated',
-        reload as EventListener
+        onRefresh as EventListener
       );
     };
-  }, []);
+  }, [reload]);
 
-  const navigateToInvoice = (invoiceId: string): void => {
-    setViewRealInvoiceId(invoiceId);
+  const navigateToInvoice = (
+    invoiceId: string | undefined,
+    orderNumber: string
+  ): void => {
+    setViewRealInvoice({ id: invoiceId, ref: orderNumber });
   };
 
   const navigateToTxn = (txnNo: string): void => {
-    const all = loadTransactions();
-    const found = all.find((t) => t.transactionNo === txnNo);
+    const found = transactions.find((x) => x.transactionNo === txnNo);
     if (found) setViewTxn(found);
   };
 
-  const filtered = useMemo(() => {
-    let list = [...transactions];
+  // ----------------------------------------------------------
+  // FILTERING
+  // ----------------------------------------------------------
+  const applyCommonFilters = useCallback(
+    (source: Transaction[]): Transaction[] => {
+      let list = [...source];
 
-    if (mainTab !== 'All') {
-      if (mainTab === 'Return') {
-        list = list.filter(isReturnEntry);
-      } else if (mainTab === 'Out') {
+      if (search.trim()) {
+        const q = search.toLowerCase();
         list = list.filter(
-          (t) => t.type === 'Out' && t.status !== 'Returned'
+          (x) =>
+            x.transactionNo.toLowerCase().includes(q) ||
+            x.customerName.toLowerCase().includes(q) ||
+            x.companyName.toLowerCase().includes(q) ||
+            x.invoiceRef.toLowerCase().includes(q)
         );
-      } else {
-        list = list.filter((t) => t.type === mainTab);
       }
-    }
 
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (t) =>
-          t.transactionNo.toLowerCase().includes(q) ||
-          t.customerName.toLowerCase().includes(q) ||
-          t.companyName.toLowerCase().includes(q) ||
-          t.invoiceRef.toLowerCase().includes(q)
-      );
-    }
-
-    if (modeFilter !== 'All') {
-      list = list.filter((t) => t.mode === modeFilter);
-    }
-
-    if (datePreset !== 'All') {
-      switch (datePreset) {
-        case '7d':
-          list = list.filter((t) => isWithinDays(t.date, 7));
-          break;
-        case '30d':
-          list = list.filter((t) => isWithinDays(t.date, 30));
-          break;
-        case '3m':
-          list = list.filter((t) => isWithinMonths(t.date, 3));
-          break;
-        case '6m':
-          list = list.filter((t) => isWithinMonths(t.date, 6));
-          break;
-        case '1y':
-          list = list.filter((t) => isWithinMonths(t.date, 12));
-          break;
+      if (modeFilter !== 'All') {
+        list = list.filter((x) => x.mode === modeFilter);
       }
+
+      if (datePreset !== 'All') {
+        list = list.filter((x) => matchesDatePreset(x.date, datePreset));
+      }
+      if (customFrom) list = list.filter((x) => x.date >= customFrom);
+      if (customTo) list = list.filter((x) => x.date <= customTo);
+
+      return list;
+    },
+    [search, modeFilter, datePreset, customFrom, customTo]
+  );
+
+  const statsBase = useMemo(
+    () => applyCommonFilters(transactions),
+    [transactions, applyCommonFilters]
+  );
+
+  const filtered = useMemo(() => {
+    let list = [...statsBase];
+
+    if (mainTab === 'Return') {
+      list = list.filter(isReturnEntry);
+    } else if (mainTab === 'Out') {
+      list = list.filter((x) => x.type === 'Out' && x.status !== 'Returned');
+    } else if (mainTab === 'In') {
+      list = list.filter((x) => x.type === 'In');
     }
-    if (customFrom) list = list.filter((t) => t.date >= customFrom);
-    if (customTo) list = list.filter((t) => t.date <= customTo);
 
     list.sort((a, b) => {
       switch (sortBy) {
@@ -2818,56 +2649,8 @@ export default function AccountingPage(): React.JSX.Element {
     });
 
     return list;
-  }, [
-    transactions,
-    mainTab,
-    search,
-    modeFilter,
-    datePreset,
-    customFrom,
-    customTo,
-    sortBy,
-  ]);
+  }, [statsBase, mainTab, sortBy]);
 
-  const statsBase = useMemo(() => {
-    let list = [...transactions];
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (t) =>
-          t.transactionNo.toLowerCase().includes(q) ||
-          t.customerName.toLowerCase().includes(q) ||
-          t.companyName.toLowerCase().includes(q) ||
-          t.invoiceRef.toLowerCase().includes(q)
-      );
-    }
-    if (modeFilter !== 'All')
-      list = list.filter((t) => t.mode === modeFilter);
-    if (datePreset !== 'All') {
-      switch (datePreset) {
-        case '7d':
-          list = list.filter((t) => isWithinDays(t.date, 7));
-          break;
-        case '30d':
-          list = list.filter((t) => isWithinDays(t.date, 30));
-          break;
-        case '3m':
-          list = list.filter((t) => isWithinMonths(t.date, 3));
-          break;
-        case '6m':
-          list = list.filter((t) => isWithinMonths(t.date, 6));
-          break;
-        case '1y':
-          list = list.filter((t) => isWithinMonths(t.date, 12));
-          break;
-      }
-    }
-    if (customFrom) list = list.filter((t) => t.date >= customFrom);
-    if (customTo) list = list.filter((t) => t.date <= customTo);
-    return list;
-  }, [transactions, search, modeFilter, datePreset, customFrom, customTo]);
-
-  // ✅ Kaun si "In" entry ki return hui hai (sirf usi par HAS RETURN)
   const returnOwnerIds = useMemo(
     () => getReturnOwnerIds(transactions),
     [transactions]
@@ -2875,35 +2658,41 @@ export default function AccountingPage(): React.JSX.Element {
 
   const returnEntries = statsBase.filter(isReturnEntry);
   const realOutEntries = statsBase.filter(
-    (t) => t.type === 'Out' && t.status !== 'Returned'
+    (x) => x.type === 'Out' && x.status !== 'Returned'
   );
-  const realInEntries = statsBase.filter((t) => t.type === 'In');
+  const realInEntries = statsBase.filter((x) => x.type === 'In');
 
   const statAll = statsBase.length;
   const statIn = realInEntries.length;
   const statOut = realOutEntries.length;
   const statReturn = returnEntries.length;
 
-  const totalIn = realInEntries.reduce((s, t) => s + t.amount, 0);
-  const totalOut = realOutEntries.reduce((s, t) => s + t.amount, 0);
-  const totalReturn = returnEntries.reduce((s, t) => s + t.amount, 0);
+  const totalIn = realInEntries.reduce((s, x) => s + x.amount, 0);
+  const totalOut = realOutEntries.reduce((s, x) => s + x.amount, 0);
+  const totalReturn = returnEntries.reduce((s, x) => s + x.amount, 0);
 
-  const handleNewEntry = (t: Transaction): void => {
-    const updated = loadTransactions();
-    setTransactions(updated);
+  // ----------------------------------------------------------
+  // ACTIONS
+  // ----------------------------------------------------------
+  const handleNewEntrySaved = (): void => {
     setShowNewEntry(false);
-    if (!updated.some((x) => x.id === t.id)) {
-      const withNew = [t, ...transactions];
-      saveTransactions(withNew);
-      setTransactions(withNew);
-    }
+    void reload(true);
   };
 
-  const handleDelete = (id: string): void => {
-    const updated = transactions.filter((t) => t.id !== id);
-    saveTransactions(updated);
-    setTransactions(updated);
-    setDeleteTarget(null);
+  const handleDelete = async (id: string): Promise<void> => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await accountingService.deleteTransaction(id);
+      setDeleteTarget(null);
+      await reload(true);
+    } catch (e) {
+      console.error('deleteTransaction failed', e);
+      setLoadError(tr.loadError);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const clearFilters = (): void => {
@@ -2937,16 +2726,16 @@ export default function AccountingPage(): React.JSX.Element {
   const handleExportPDF = (): void => {
     const rows = filtered
       .map(
-        (t, i) => `<tr>
+        (x, i) => `<tr>
           <td>${i + 1}</td>
-          <td>${formatDate(t.date, language)}</td>
-          <td>${t.transactionNo}</td>
-          <td>${t.customerName}${t.companyName ? `<br><span class="muted">${t.companyName}</span>` : ''}</td>
-          <td>${t.invoiceRef}</td>
-          <td class="r">${t.mode}</td>
-          <td class="r ${t.type === 'In' ? 'in' : t.type === 'Out' ? 'out' : 'ret'}">${typeLabel(t.type, tr)}</td>
-          <td class="r">${formatPrice(t.amount, language)}</td>
-          <td class="r">${statusLabel(t.status, tr)}</td>
+          <td>${formatDate(x.date, language)}</td>
+          <td>${escapeHtml(x.transactionNo)}</td>
+          <td>${escapeHtml(x.customerName)}${x.companyName ? `<br><span class="muted">${escapeHtml(x.companyName)}</span>` : ''}</td>
+          <td>${escapeHtml(x.invoiceRef)}</td>
+          <td class="r">${x.mode}</td>
+          <td class="r ${x.type === 'In' ? 'in' : x.type === 'Out' ? 'out' : 'ret'}">${typeLabel(x.type, tr)}</td>
+          <td class="r">${formatPrice(x.amount, language)}</td>
+          <td class="r">${statusLabel(x.status, tr)}</td>
         </tr>`
       )
       .join('');
@@ -3002,6 +2791,14 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
     printHtmlDocument(html);
   };
 
+  const netValue = Math.abs(
+    filtered.filter((x) => x.type === 'In').reduce((s, x) => s + x.amount, 0) -
+      filtered.filter(isReturnEntry).reduce((s, x) => s + x.amount, 0) -
+      filtered
+        .filter((x) => x.type === 'Out' && x.status !== 'Returned')
+        .reduce((s, x) => s + x.amount, 0)
+  );
+
   return (
     <div
       dir={rtl ? 'rtl' : 'ltr'}
@@ -3038,6 +2835,29 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="mb-4 p-3 rounded-xl text-[12px] font-semibold flex items-center justify-between gap-3"
+          style={{
+            backgroundColor: 'rgba(196,154,90,0.1)',
+            border: '1px solid rgba(196,154,90,0.4)',
+            color: THEME.charcoal,
+          }}
+        >
+          <span className="flex items-center gap-2">
+            {Icons.alert}
+            <span>{loadError}</span>
+          </span>
+          <button
+            onClick={() => void reload()}
+            className="text-[11px] font-bold hover:underline cursor-pointer flex-shrink-0"
+            style={{ color: THEME.warmBrass }}
+          >
+            {tr.retry}
+          </button>
+        </div>
+      )}
 
       <div className="mb-4">
         <AccountingDashboard />
@@ -3280,28 +3100,24 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
           <p className="text-[12px]" style={{ color: THEME.mutedOlive }}>
             {tr.net}:{' '}
             <span className="font-bold" style={{ color: THEME.warmBrass }}>
-              {formatPrice(
-                Math.abs(
-                  filtered
-                    .filter((t) => t.type === 'In')
-                    .reduce((s, t) => s + t.amount, 0) -
-                    filtered
-                      .filter(isReturnEntry)
-                      .reduce((s, t) => s + t.amount, 0) -
-                    filtered
-                      .filter(
-                        (t) => t.type === 'Out' && t.status !== 'Returned'
-                      )
-                      .reduce((s, t) => s + t.amount, 0)
-                ),
-                language
-              )}
+              {formatPrice(netValue, language)}
             </span>
           </p>
         )}
       </div>
 
-      {filtered.length > 0 ? (
+      {loading && transactions.length === 0 ? (
+        <div
+          className="rounded-2xl p-8 text-center text-[12px]"
+          style={{
+            backgroundColor: '#FFFFFF',
+            border: `1px solid rgba(102,116,90,0.1)`,
+            color: THEME.mutedOlive,
+          }}
+        >
+          {tr.loading}
+        </div>
+      ) : filtered.length > 0 ? (
         <div
           className="rounded-2xl overflow-hidden"
           style={{
@@ -3364,13 +3180,13 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((t) => {
-                  const tone = getTypeTone(t.type);
-                  const statusTone = getStatusTone(t.status);
-                  const isReturn = isReturnEntry(t);
+                {filtered.map((x) => {
+                  const tone = getTypeTone(x.type);
+                  const statusTone = getStatusTone(x.status);
+                  const isReturn = isReturnEntry(x);
                   return (
                     <tr
-                      key={t.id}
+                      key={x.id}
                       className="border-b transition"
                       style={{ borderColor: 'rgba(102,116,90,0.05)' }}
                     >
@@ -3378,33 +3194,33 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                         className="px-3 py-2 text-[11px] font-mono whitespace-nowrap"
                         style={{ color: THEME.mutedOlive }}
                       >
-                        {formatDate(t.date, language)}
+                        {formatDate(x.date, language)}
                       </td>
                       <td className="px-3 py-2 max-w-xs">
                         <p
                           className="text-[12px] font-semibold truncate"
                           style={{ color: THEME.charcoal }}
                         >
-                          {t.customerName || '—'}
+                          {x.customerName || '—'}
                         </p>
                         <p
                           className="text-[9px] truncate mt-0.5"
                           style={{ color: THEME.mutedOlive }}
                         >
-                          {t.transactionNo}
-                          {t.companyName && ` • ${t.companyName}`}
+                          {x.transactionNo}
+                          {x.companyName && ` • ${x.companyName}`}
                         </p>
                       </td>
                       <td className="px-3 py-2 hidden md:table-cell">
-                        {t.invoiceRef && t.invoiceRef !== '—' ? (
+                        {x.invoiceRef && x.invoiceRef !== '—' ? (
                           <button
                             type="button"
-                            onClick={() => copyInvoiceRef(t.invoiceRef, t.id)}
+                            onClick={() => copyInvoiceRef(x.invoiceRef, x.id)}
                             className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold cursor-pointer"
                             style={{ color: THEME.warmBrass }}
                           >
-                            <span>{t.invoiceRef}</span>
-                            {copiedId === t.id ? (
+                            <span>{x.invoiceRef}</span>
+                            {copiedId === x.id ? (
                               <span style={{ color: THEME.deepForest }}>
                                 {Icons.check}
                               </span>
@@ -3426,10 +3242,9 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                           className="text-[10px]"
                           style={{ color: THEME.mutedOlive }}
                         >
-                          {t.mode || '—'}
+                          {x.mode || '—'}
                         </span>
                       </td>
-                      {/* ✅ TYPE: pill hamesha center, tag neeche */}
                       <td className="px-3 py-2 text-center">
                         <div className="flex flex-col items-center gap-0.5">
                           <span
@@ -3440,25 +3255,26 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                               borderColor: tone.border,
                             }}
                           >
-                            {t.type === 'In'
+                            {x.type === 'In'
                               ? Icons.arrowDown
-                              : t.type === 'Out'
+                              : x.type === 'Out'
                                 ? Icons.arrowUp
                                 : Icons.return}
-                            <span>{typeLabel(t.type, tr)}</span>
+                            <span>{typeLabel(x.type, tr)}</span>
                           </span>
 
-                          {isReturn && t.linkedInvoiceId && (
-                            <span
-                              className="inline-flex items-center gap-0.5 text-[8px] font-bold"
-                              style={{ color: THEME.warmBrass }}
-                            >
-                              {Icons.link}
-                              <span>linked</span>
-                            </span>
-                          )}
+                          {isReturn &&
+                            (x.linkedInvoiceId || x.originalTransactionId) && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[8px] font-bold"
+                                style={{ color: THEME.warmBrass }}
+                              >
+                                {Icons.link}
+                                <span>linked</span>
+                              </span>
+                            )}
 
-                          {t.type === 'In' && returnOwnerIds.has(t.id) && (
+                          {x.type === 'In' && returnOwnerIds.has(x.id) && (
                             <span
                               className="inline-flex items-center gap-0.5 text-[8px] font-bold"
                               style={{ color: THEME.warmBrass }}
@@ -3473,8 +3289,8 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                         className="px-3 py-2 text-right text-[12px] font-bold whitespace-nowrap"
                         style={{ color: tone.icon }}
                       >
-                        {t.type === 'In' ? '+' : t.type === 'Out' ? '−' : '↺'}{' '}
-                        {formatPrice(t.amount, language)}
+                        {x.type === 'In' ? '+' : x.type === 'Out' ? '−' : '↺'}{' '}
+                        {formatPrice(x.amount, language)}
                       </td>
                       <td className="px-3 py-2 hidden md:table-cell text-center">
                         <span
@@ -3484,13 +3300,13 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                             color: statusTone.text,
                           }}
                         >
-                          {t.status ? statusLabel(t.status, tr) : '—'}
+                          {x.status ? statusLabel(x.status, tr) : '—'}
                         </span>
                       </td>
                       <td className="px-1 py-2 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button
-                            onClick={() => setViewTxn(t)}
+                            onClick={() => setViewTxn(x)}
                             className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition border"
                             style={{
                               backgroundColor: THEME.warmIvory,
@@ -3501,7 +3317,7 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
                             {Icons.eye}
                           </button>
                           <button
-                            onClick={() => setDeleteTarget(t)}
+                            onClick={() => setDeleteTarget(x)}
                             className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition border"
                             style={{
                               backgroundColor: 'rgba(196,154,90,0.15)',
@@ -3573,7 +3389,7 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
       {showNewEntry && (
         <NewEntryModal
           onClose={() => setShowNewEntry(false)}
-          onSaved={handleNewEntry}
+          onSaved={handleNewEntrySaved}
           existing={transactions}
           tr={tr}
           lang={language}
@@ -3592,12 +3408,13 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
         />
       )}
 
-      {viewRealInvoiceId && (
+      {viewRealInvoice && (
         <RealInvoiceModal
-          invoiceIdOrRef={viewRealInvoiceId}
+          invoiceId={viewRealInvoice.id}
+          orderNumber={viewRealInvoice.ref}
           tr={tr}
           lang={language}
-          onClose={() => setViewRealInvoiceId(null)}
+          onClose={() => setViewRealInvoice(null)}
         />
       )}
 
@@ -3626,14 +3443,16 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setDeleteTarget(null)}
-                className={`${ghostBtn} flex-1`}
+                disabled={deleting}
+                className={`${ghostBtn} flex-1 disabled:opacity-40`}
                 style={ghostBtnStyle}
               >
                 {tr.cancel}
               </button>
               <button
-                onClick={() => handleDelete(deleteTarget.id)}
-                className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition"
+                onClick={() => void handleDelete(deleteTarget.id)}
+                disabled={deleting}
+                className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   backgroundColor: THEME.charcoal,
                   color: '#FFFFFF',
@@ -3645,7 +3464,7 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
           </div>
         </Modal>
       )}
-      {/* ✅ 4 CHARTS — now imported, fully independent, zero props */}
+
       <AccountingCharts />
     </div>
   );

@@ -1,7 +1,15 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
 import { loadUnits, getDefaultUnit } from '../settings/SettingsPage';
+import {
+  productService,
+  type Product as DbProduct,
+  type ProductInput,
+  type Category,
+} from '@renderer/services/productService';
 import InventoryStats from './InventoryStats';
 import InventoryCharts from './InventoryCharts';
 
@@ -463,8 +471,8 @@ type Translations = {
 // TYPES
 // ============================================================
 type StockStatus = 'In Stock' | 'Low Stock' | 'Out of Stock';
-type OrderStatus = 'Pending' | 'Received' | 'Cancelled';
 type SortKey = 'name' | 'price' | 'stock' | 'date' | 'category';
+type Unit = ReturnType<typeof loadUnits>[number];
 
 type Product = {
   id: string;
@@ -479,51 +487,14 @@ type Product = {
   active: boolean;
   createdAt: string;
   updatedAt: string;
-  unit: string;
-  category: string;
-};
-
-type Category = {
-  id: string;
-  name: string;
-  createdAt: string;
-};
-
-type OrderItem = {
-  id: string;
-  productId: string;
-  sku: string;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  lineTotal: number;
-  unit: string;
-};
-
-// Orders are still read (only) so a product with order history can't be deleted.
-type Order = {
-  id: string;
-  orderNumber: string;
-  vendorId: string;
-  orderDate: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  totalAmount: number;
-  createdBy: string;
-  createdAt: string;
+  unit: string; // unit_id
+  category: string; // category name (display / filter)
+  categoryId: string | null;
 };
 
 // ============================================================
-// THEME
+// THEME (THEME itself is imported from '@renderer/theme/theme')
 // ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
-
 const SOFT_BG = 'rgba(18, 60, 50, 0.06)';
 const ROW_BG = 'rgba(18, 60, 50, 0.10)';
 const ROW_BG_HOVER = 'rgba(18, 60, 50, 0.18)';
@@ -662,9 +633,9 @@ const Icons = {
 // ============================================================
 // CONSTANTS + HELPERS
 // ============================================================
-const PRODUCTS_KEY = 'zakhira_inventory_products';
-const ORDERS_KEY = 'zakhira_inventory_orders';
-const CATEGORIES_KEY = 'zakhira_inventory_categories';
+// Temporary: backend products table has no images column,
+// so images are kept locally per product id.
+const IMAGES_KEY = 'zakhira_product_images';
 
 const PAGE_SIZE = 10;
 const MAX_IMAGES = 5;
@@ -673,9 +644,6 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const FALLBACK_UNIT = 'piece';
 const FALLBACK_CATEGORY = 'Uncategorized';
 const ALL_CATEGORIES = '__all__';
-
-const uid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const roundMoney = (n: number): number =>
   Math.round((n + Number.EPSILON) * 100) / 100;
@@ -697,12 +665,13 @@ const formatDate = (iso: string): string => {
 
 const isWholeNumber = (s: string): boolean => /^\d+$/.test(s.trim());
 
-const unitLabel = (unitName: string): string => {
+// unit is stored as unit_id; label is resolved from the units list
+const unitLabel = (unitId: string): string => {
   try {
-    const found = loadUnits().find((u) => u.name === unitName);
-    return found ? found.label : unitName || FALLBACK_UNIT;
+    const found = loadUnits().find((u) => u.id === unitId);
+    return found ? found.label : FALLBACK_UNIT;
   } catch {
-    return unitName || FALLBACK_UNIT;
+    return FALLBACK_UNIT;
   }
 };
 
@@ -768,40 +737,56 @@ const getStoredLanguage = (): Language => {
 const isRTLLang = (l: Language): boolean => l === 'ar' || l === 'ur';
 
 // ============================================================
-// STORAGE
+// IMAGE STORAGE (temporary, local) + DB → UI MAPPING
 // ============================================================
-const readList = <T,>(key: string): T[] => {
+const readImageMap = (): Record<string, string[]> => {
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
+    return JSON.parse(localStorage.getItem(IMAGES_KEY) || '{}');
   } catch {
-    return [];
+    return {};
   }
 };
 
-const writeList = <T,>(key: string, list: T[]): boolean => {
+const getProductImages = (id: string): string[] => readImageMap()[id] || [];
+
+const saveProductImages = (id: string, imgs: string[]): boolean => {
   try {
-    localStorage.setItem(key, JSON.stringify(list));
+    const map = readImageMap();
+    map[id] = imgs;
+    localStorage.setItem(IMAGES_KEY, JSON.stringify(map));
     return true;
   } catch {
     return false;
   }
 };
 
-const loadProducts = (): Product[] =>
-  readList<Partial<Product>>(PRODUCTS_KEY).map((p) => ({
-    ...p,
-    unit: p.unit || FALLBACK_UNIT,
-    category: p.category || FALLBACK_CATEGORY,
-  })) as Product[];
-const saveProducts = (list: Product[]): boolean =>
-  writeList(PRODUCTS_KEY, list);
-const loadOrders = (): Order[] => readList<Order>(ORDERS_KEY);
-const loadCategories = (): Category[] => readList<Category>(CATEGORIES_KEY);
-const saveCategories = (list: Category[]): boolean =>
-  writeList(CATEGORIES_KEY, list);
+const removeProductImages = (id: string): void => {
+  try {
+    const map = readImageMap();
+    delete map[id];
+    localStorage.setItem(IMAGES_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+};
+
+const toUiProduct = (p: DbProduct, cats: Category[]): Product => ({
+  id: p.id,
+  sku: p.sku,
+  name: p.name,
+  description: p.description || '',
+  price: Number(p.price),
+  costPrice: Number(p.cost_price) || undefined,
+  stock: Number(p.stock),
+  lowStockLevel: Number(p.low_stock_level),
+  images: getProductImages(p.id),
+  active: p.active,
+  createdAt: p.created_at,
+  updatedAt: p.updated_at,
+  unit: p.unit_id,
+  category: cats.find((c) => c.id === p.category_id)?.name || FALLBACK_CATEGORY,
+  categoryId: p.category_id,
+});
 
 // ============================================================
 // STYLES
@@ -1171,8 +1156,9 @@ function NewCategoryModal({
 }): React.JSX.Element {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     const clean = name.trim();
     if (!clean) return setError(tr.errCategoryName);
     const exists = existingNames.some(
@@ -1180,15 +1166,14 @@ function NewCategoryModal({
     );
     if (exists) return setError(tr.errCategoryExists);
 
-    const newCat: Category = {
-      id: uid('cat'),
-      name: clean,
-      createdAt: new Date().toISOString(),
-    };
-    if (!saveCategories([newCat, ...loadCategories()])) {
-      return setError(tr.errStorage);
+    setSaving(true);
+    try {
+      const newCat = await productService.createCategory(clean);
+      onSaved(newCat as Category);
+    } catch {
+      setError(tr.errStorage);
+      setSaving(false);
     }
-    onSaved(newCat);
   };
 
   const req = <span style={{ color: THEME.warmBrass }}>*</span>;
@@ -1221,7 +1206,7 @@ function NewCategoryModal({
               borderColor: error ? THEME.warmBrass : `${THEME.mutedOlive}40`,
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
+              if (e.key === 'Enter') void submit();
             }}
           />
         </div>
@@ -1244,7 +1229,15 @@ function NewCategoryModal({
           className="flex gap-2.5 pt-3"
           style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}
         >
-          <button onClick={submit} style={brassBtn}>
+          <button
+            onClick={() => void submit()}
+            disabled={saving}
+            style={{
+              ...brassBtn,
+              opacity: saving ? 0.4 : 1,
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
             {Icons.check}
             <span>{tr.saveCategory}</span>
           </button>
@@ -1262,13 +1255,19 @@ function NewCategoryModal({
 // ============================================================
 function ProductFormModal({
   product,
+  products,
+  categories,
+  onCategoryCreated,
   onClose,
   onSaved,
   tr,
 }: {
   product?: Product | null;
+  products: Product[];
+  categories: Category[];
+  onCategoryCreated: (c: Category) => void;
   onClose: () => void;
-  onSaved: (p: Product, isEdit: boolean) => void;
+  onSaved: (sku: string, isEdit: boolean) => void;
   tr: Translations;
 }): React.JSX.Element {
   const isEdit = !!product;
@@ -1286,21 +1285,19 @@ function ProductFormModal({
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [units] = useState(() => loadUnits());
+  const [units] = useState<Unit[]>(() => loadUnits());
   const [unit, setUnit] = useState<string>(
-    () => product?.unit || getDefaultUnit()?.name || FALLBACK_UNIT
+    () => product?.unit || getDefaultUnit()?.id || loadUnits()[0]?.id || ''
   );
 
   const [nextSKU] = useState(() =>
-    isEdit ? product!.sku : generateSKU(loadProducts())
+    isEdit ? product!.sku : generateSKU(products)
   );
 
-  const [categories, setCategories] = useState<Category[]>(() =>
-    loadCategories()
-  );
-  const [category, setCategory] = useState<string>(
-    () => product?.category || loadCategories()[0]?.name || FALLBACK_CATEGORY
+  const [categoryId, setCategoryId] = useState<string>(
+    () => product?.categoryId || categories[0]?.id || ''
   );
   const [showNewCategory, setShowNewCategory] = useState(false);
 
@@ -1330,7 +1327,7 @@ function ProductFormModal({
     }
   };
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     if (!name.trim()) return setError(tr.errProductName);
     if (!price || Number(price) <= 0) return setError(tr.errPrice);
     if (costPrice !== '' && Number(costPrice) < 0) {
@@ -1339,64 +1336,36 @@ function ProductFormModal({
     if (stock === '' || !isWholeNumber(stock)) return setError(tr.errStock);
     if (!unit) return setError(tr.errUnit);
     if (images.length === 0) return setError(tr.errImages);
-    if (
-      !category ||
-      category === FALLBACK_CATEGORY ||
-      categories.length === 0
-    ) {
+    if (!categoryId) {
       return setError(
         categories.length === 0 ? tr.noCategories : tr.errCategoryRequired
       );
     }
 
-    const now = new Date().toISOString();
-    const costPriceValue =
-      costPrice !== '' && Number(costPrice) >= 0
-        ? roundMoney(Number(costPrice))
-        : undefined;
+    const input: ProductInput = {
+      sku: nextSKU,
+      name: name.trim(),
+      description: description.trim(),
+      price: roundMoney(Number(price)),
+      cost_price: costPrice !== '' ? roundMoney(Number(costPrice)) : 0,
+      stock: Number(stock),
+      low_stock_level: Number(lowStockLevel) || DEFAULT_LOW_STOCK,
+      unit_id: unit,
+      category_id: categoryId,
+    };
 
-    if (isEdit && product) {
-      const updated: Product = {
-        ...product,
-        name: name.trim(),
-        description: description.trim(),
-        price: roundMoney(Number(price)),
-        costPrice: costPriceValue,
-        stock: Number(stock),
-        lowStockLevel: Number(lowStockLevel) || DEFAULT_LOW_STOCK,
-        images,
-        unit,
-        category: category || FALLBACK_CATEGORY,
-        updatedAt: now,
-      };
-      if (
-        !saveProducts(
-          loadProducts().map((p) => (p.id === product.id ? updated : p))
-        )
-      ) {
-        return setError(tr.errStorage);
-      }
-      onSaved(updated, true);
-    } else {
-      const newProduct: Product = {
-        id: uid('prd'),
-        sku: nextSKU,
-        name: name.trim(),
-        description: description.trim(),
-        price: roundMoney(Number(price)),
-        costPrice: costPriceValue,
-        stock: Number(stock),
-        lowStockLevel: Number(lowStockLevel) || DEFAULT_LOW_STOCK,
-        images,
-        active: true,
-        createdAt: now,
-        updatedAt: now,
-        unit,
-        category: category || FALLBACK_CATEGORY,
-      };
-      if (!saveProducts([newProduct, ...loadProducts()]))
-        return setError(tr.errStorage);
-      onSaved(newProduct, false);
+    setSaving(true);
+    setError('');
+    try {
+      const saved =
+        isEdit && product
+          ? await productService.updateProduct(product.id, input)
+          : await productService.createProduct(input);
+      saveProductImages(saved.id, images);
+      onSaved(input.sku, isEdit);
+    } catch {
+      setError(tr.errStorage);
+      setSaving(false);
     }
   };
 
@@ -1522,18 +1491,16 @@ function ProductFormModal({
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
                   className={`${inputCls} cursor-pointer`}
                   style={INPUT_STYLE}
                 >
                   {categories.length === 0 ? (
-                    <option value={FALLBACK_CATEGORY}>
-                      {FALLBACK_CATEGORY}
-                    </option>
+                    <option value="">{FALLBACK_CATEGORY}</option>
                   ) : (
                     categories.map((c) => (
-                      <option key={c.id} value={c.name}>
+                      <option key={c.id} value={c.id}>
                         {c.name}
                       </option>
                     ))
@@ -1606,10 +1573,10 @@ function ProductFormModal({
                 style={INPUT_STYLE}
               >
                 {units.length === 0 ? (
-                  <option value={FALLBACK_UNIT}>Piece</option>
+                  <option value="">Piece</option>
                 ) : (
                   units.map((u) => (
-                    <option key={u.id} value={u.name}>
+                    <option key={u.id} value={u.id}>
                       {u.label}
                     </option>
                   ))
@@ -1725,12 +1692,12 @@ function ProductFormModal({
             style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}
           >
             <button
-              onClick={submit}
-              disabled={uploading}
+              onClick={() => void submit()}
+              disabled={uploading || saving}
               style={{
                 ...brassBtn,
-                opacity: uploading ? 0.4 : 1,
-                cursor: uploading ? 'not-allowed' : 'pointer',
+                opacity: uploading || saving ? 0.4 : 1,
+                cursor: uploading || saving ? 'not-allowed' : 'pointer',
               }}
             >
               {Icons.check}
@@ -1749,9 +1716,8 @@ function ProductFormModal({
           existingNames={categories.map((c) => c.name)}
           onClose={() => setShowNewCategory(false)}
           onSaved={(newCat) => {
-            const updated = loadCategories();
-            setCategories(updated);
-            setCategory(newCat.name);
+            onCategoryCreated(newCat);
+            setCategoryId(newCat.id);
             setShowNewCategory(false);
           }}
         />
@@ -1857,10 +1823,7 @@ function ProductPreviewModal({
           </div>
           {product.description && (
             <PreviewField label={tr.descriptionLabel}>
-              <p
-                className="text-[12px]"
-                style={{ color: THEME.charcoal }}
-              >
+              <p className="text-[12px]" style={{ color: THEME.charcoal }}>
                 {product.description}
               </p>
             </PreviewField>
@@ -1913,9 +1876,7 @@ function ProductPreviewModal({
                   className="text-[13px] font-bold"
                   style={{
                     color:
-                      profit !== null && profit >= 0
-                        ? '#15803d'
-                        : '#b91c1c',
+                      profit !== null && profit >= 0 ? '#15803d' : '#b91c1c',
                   }}
                 >
                   {profit !== null ? formatMoney(profit) : '—'}
@@ -1926,9 +1887,7 @@ function ProductPreviewModal({
                   className="text-[13px] font-bold"
                   style={{
                     color:
-                      profit !== null && profit >= 0
-                        ? '#15803d'
-                        : '#b91c1c',
+                      profit !== null && profit >= 0 ? '#15803d' : '#b91c1c',
                   }}
                 >
                   {profitPct !== null ? `${profitPct}%` : '—'}
@@ -1954,18 +1913,12 @@ function ProductPreviewModal({
             style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}
           >
             <PreviewField label={tr.createdLabel}>
-              <p
-                className="text-[11px]"
-                style={{ color: THEME.charcoal }}
-              >
+              <p className="text-[11px]" style={{ color: THEME.charcoal }}>
                 {formatDate(product.createdAt)}
               </p>
             </PreviewField>
             <PreviewField label={tr.updatedLabel}>
-              <p
-                className="text-[11px]"
-                style={{ color: THEME.charcoal }}
-              >
+              <p className="text-[11px]" style={{ color: THEME.charcoal }}>
                 {formatDate(product.updatedAt)}
               </p>
             </PreviewField>
@@ -2004,11 +1957,8 @@ export default function ProductsPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const isRTL = isRTLLang(language);
 
-  const [products, setProducts] = useState<Product[]>(() => loadProducts());
-  const [orders, setOrders] = useState<Order[]>(() => loadOrders());
-  const [categories, setCategories] = useState<Category[]>(() =>
-    loadCategories()
-  );
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -2026,13 +1976,6 @@ export default function ProductsPage(): React.JSX.Element {
   const [sortBy, setSortBy] = useState<SortKey>('date');
   const [page, setPage] = useState(1);
 
-  const refresh = (): void => {
-    setProducts(loadProducts());
-    setOrders(loadOrders());
-    setCategories(loadCategories());
-    window.dispatchEvent(new Event('zakhira:inventory-updated'));
-  };
-
   const showSuccess = (msg: string): void => {
     setSuccessMsg(msg);
     setErrorMsg('');
@@ -2044,6 +1987,25 @@ export default function ProductsPage(): React.JSX.Element {
     setSuccessMsg('');
     setTimeout(() => setErrorMsg(''), 3500);
   };
+
+  const refresh = async (): Promise<void> => {
+    try {
+      const [dbProducts, cats] = await Promise.all([
+        productService.getProducts(),
+        productService.getCategories(),
+      ]);
+      setCategories(cats);
+      setProducts(dbProducts.map((p) => toUiProduct(p, cats)));
+      window.dispatchEvent(new Event('zakhira:inventory-updated'));
+    } catch (e) {
+      showError(e instanceof Error ? e.message : tr.errStorage);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const outOfStockProducts = products.filter((p) => p.stock === 0);
 
@@ -2138,11 +2100,11 @@ export default function ProductsPage(): React.JSX.Element {
     priceMax !== '' ||
     sortBy !== 'date';
 
-  const handleSaved = (p: Product, isEdit: boolean): void => {
-    refresh();
+  const handleSaved = async (sku: string, isEdit: boolean): Promise<void> => {
+    await refresh();
     setShowAddProduct(false);
     setEditingProduct(null);
-    showSuccess(isEdit ? tr.toastUpdated(p.sku) : tr.toastCreated(p.sku));
+    showSuccess(isEdit ? tr.toastUpdated(sku) : tr.toastCreated(sku));
   };
 
   const handleEdit = (p: Product): void => {
@@ -2150,23 +2112,21 @@ export default function ProductsPage(): React.JSX.Element {
     setShowAddProduct(true);
   };
 
-  const handleDelete = (p: Product): void => {
-    const hasHistory = orders.some((o) =>
-      o.items.some((it) => it.productId === p.id)
-    );
-    if (hasHistory) {
-      showError(tr.toastHasHistory(p.name));
+  const handleDelete = async (p: Product): Promise<void> => {
+    try {
+      await productService.deleteProduct(p.id);
+      removeProductImages(p.id);
+      await refresh();
+      showSuccess(tr.toastDeleted(p.sku));
+    } catch (e) {
+      // 23503 = foreign key violation (product has order history)
+      const code = (e as { code?: string })?.code;
+      showError(
+        code === '23503' ? tr.toastHasHistory(p.name) : tr.errDeleteStorage
+      );
+    } finally {
       setDeleteTarget(null);
-      return;
     }
-    if (!saveProducts(loadProducts().filter((x) => x.id !== p.id))) {
-      showError(tr.errDeleteStorage);
-      setDeleteTarget(null);
-      return;
-    }
-    refresh();
-    setDeleteTarget(null);
-    showSuccess(tr.toastDeleted(p.sku));
   };
 
   const lbl = { color: THEME.deepForest };
@@ -2182,10 +2142,7 @@ export default function ProductsPage(): React.JSX.Element {
         <h1 className="text-xl font-bold" style={{ color: THEME.deepForest }}>
           {tr.pageTitle}
         </h1>
-        <p
-          className="mt-1 text-[12px]"
-          style={{ color: THEME.mutedOlive }}
-        >
+        <p className="mt-1 text-[12px]" style={{ color: THEME.mutedOlive }}>
           {tr.pageSubtitle}
         </p>
       </div>
@@ -2441,9 +2398,7 @@ export default function ProductsPage(): React.JSX.Element {
             style={{ color: THEME.deepForest }}
           >
             {tr.products}{' '}
-            <span className="text-[11px] font-normal">
-              ({filtered.length})
-            </span>
+            <span className="text-[11px] font-normal">({filtered.length})</span>
           </h2>
         </div>
 
@@ -2497,9 +2452,7 @@ export default function ProductsPage(): React.JSX.Element {
                                 className="w-full h-full object-cover"
                               />
                             ) : (
-                              <span
-                                style={{ color: `${THEME.mutedOlive}66` }}
-                              >
+                              <span style={{ color: `${THEME.mutedOlive}66` }}>
                                 {Icons.image}
                               </span>
                             )}
@@ -2632,10 +2585,7 @@ export default function ProductsPage(): React.JSX.Element {
           </>
         ) : (
           <div className="py-12 text-center">
-            <p
-              className="text-[13px]"
-              style={{ color: THEME.mutedOlive }}
-            >
+            <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
               {tr.noProducts}
             </p>
             <button
@@ -2655,11 +2605,14 @@ export default function ProductsPage(): React.JSX.Element {
       {showAddProduct && (
         <ProductFormModal
           product={editingProduct}
+          products={products}
+          categories={categories}
+          onCategoryCreated={(c) => setCategories((prev) => [...prev, c])}
           onClose={() => {
             setShowAddProduct(false);
             setEditingProduct(null);
           }}
-          onSaved={handleSaved}
+          onSaved={(sku, isEdit) => void handleSaved(sku, isEdit)}
           tr={tr}
         />
       )}
@@ -2679,7 +2632,7 @@ export default function ProductsPage(): React.JSX.Element {
           confirmLabel={tr.deleteConfirm}
           cancelLabel={tr.cancel}
           danger
-          onConfirm={() => handleDelete(deleteTarget)}
+          onConfirm={() => void handleDelete(deleteTarget)}
           onCancel={() => setDeleteTarget(null)}
         />
       )}

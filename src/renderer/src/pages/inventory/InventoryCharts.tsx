@@ -1,10 +1,14 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useEffect, useState } from 'react';
+import { inventoryChartsService } from '@renderer/services/inventoryChartsService';
+import { THEME } from '@renderer/theme/theme';
 
 // ============================================================
-// 🌍 LANGUAGE (only chart labels)
+// 🌍 LANGUAGE
 // ============================================================
 type Language = 'en' | 'ar' | 'ur' | 'hi';
 
@@ -17,6 +21,7 @@ const T = {
     revenue: 'Revenue',
     byCategory: 'by Category',
     noData: 'No data yet',
+    loading: 'Loading charts...',
   },
   ar: {
     categoryProductDonut: 'الفئة / المنتج',
@@ -26,6 +31,7 @@ const T = {
     revenue: 'الإيراد',
     byCategory: 'حسب الفئة',
     noData: 'لا توجد بيانات بعد',
+    loading: 'جارٍ تحميل الرسوم...',
   },
   ur: {
     categoryProductDonut: 'کیٹیگری / پروڈکٹ',
@@ -35,6 +41,7 @@ const T = {
     revenue: 'آمدنی',
     byCategory: 'کیٹیگری کے مطابق',
     noData: 'ابھی کوئی ڈیٹا نہیں',
+    loading: 'چارٹس لوڈ ہو رہے ہیں...',
   },
   hi: {
     categoryProductDonut: 'श्रेणी / उत्पाद',
@@ -44,6 +51,7 @@ const T = {
     revenue: 'राजस्व',
     byCategory: 'श्रेणी के अनुसार',
     noData: 'अभी कोई डेटा नहीं',
+    loading: 'चार्ट लोड हो रहे हैं...',
   },
 } as const;
 
@@ -62,103 +70,14 @@ const getStoredLanguage = (): Language => {
 const isRTLLang = (l: Language): boolean => l === 'ar' || l === 'ur';
 
 // ============================================================
-// 🎨 THEME (unchanged)
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
-
-// ============================================================
-// 🔑 STORAGE
-// ============================================================
-const PRODUCTS_KEY = 'zakhira_inventory_products';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-
-const readList = <T,>(key: string): T[] => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-// ============================================================
-// TYPES
-// ============================================================
-type Product = {
-  id: string;
-  name?: string;
-  sku?: string;
-  active?: boolean;
-  category?: string;
-  price?: number;
-  stock?: number;
-  quantity?: number;
-  onHand?: number;
-  reorderLevel?: number;
-  reorderThreshold?: number;
-  cost?: number;
-  purchasePrice?: number;
-  unitCost?: number;
-};
-
-type SalesDocLine = {
-  id: string;
-  productId?: string;
-  sku?: string;
-  material?: string;
-  category?: string;
-  quantity?: number;
-  unitPrice?: number;
-  price?: number;
-  lineTotal?: number;
-};
-
-type SalesDocument = {
-  id: string;
-  documentType: 'quotation' | 'invoice';
-  status: 'Pending' | 'Approved' | 'Rejected';
-  lines?: SalesDocLine[];
-};
-
-// ============================================================
 // HELPERS
 // ============================================================
-const roundMoney = (n: number): number =>
-  Math.round((n + Number.EPSILON) * 100) / 100;
-
 const fmt = (n: number): string => {
   const abs = Math.abs(n);
   return `${n < 0 ? '-' : ''}${abs.toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })}`;
-};
-
-const norm = (s?: string): string => (s || '').trim().toLowerCase();
-
-const getQty = (p: Product): number =>
-  Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
-
-const getPrice = (p: Product): number => Number(p.price ?? 0);
-
-const getCost = (p: Product): number => {
-  const explicit = Number(p.unitCost ?? p.cost ?? p.purchasePrice ?? 0);
-  if (explicit > 0) return explicit;
-  const price = getPrice(p);
-  return price > 0 ? price * 0.6 : 0;
-};
-
-const getCategory = (p: Product): string => {
-  const cat = (p.category || '').trim();
-  return cat && cat !== 'Uncategorized' ? cat : 'Uncategorized';
 };
 
 const short = (s: string, n: number): string =>
@@ -173,44 +92,6 @@ const niceScale = (max: number, ticks = 4): { step: number; max: number } => {
   const step = m * mag;
   return { step, max: step * ticks };
 };
-
-// ============================================================
-// 🎭 FALLBACK DATA — only used when real data is empty
-// ============================================================
-const FALLBACK_DONUT = [
-  { name: 'Electronics', value: 7 },
-  { name: 'Clothing', value: 10 },
-  { name: 'Food & Beverage', value: 20 },
-  { name: 'Books & Media', value: 13 },
-  { name: 'Home & Garden', value: 50 },
-];
-
-const FALLBACK_TOP7 = [
-  { name: 'Laptop', qty: 64 },
-  { name: 'Mouse', qty: 57 },
-  { name: 'Keyboard', qty: 67 },
-  { name: 'Monitor', qty: 93 },
-  { name: 'Printer', qty: 87 },
-  { name: 'Headset', qty: 48 },
-  { name: 'Webcam', qty: 35 },
-];
-
-const FALLBACK_INV_VALUE = [
-  { name: 'Electronics', value: 89 },
-  { name: 'Clothing', value: 57 },
-  { name: 'Food & Bev.', value: 37 },
-  { name: 'Books', value: 28 },
-  { name: 'Garden', value: 19 },
-];
-
-const FALLBACK_REVENUE = [
-  { name: 'Electronics', value: 31 },
-  { name: 'Clothing', value: 22 },
-  { name: 'Food & Beverage', value: 19 },
-  { name: 'Books & Media', value: 15 },
-  { name: 'Home & Garden', value: 8 },
-  { name: 'Other', value: 5 },
-];
 
 // ============================================================
 // 🍩 RING HELPERS
@@ -290,7 +171,7 @@ const buildArcs = (data: Array<{ name: string; value: number }>): Arc[] => {
 };
 
 // ============================================================
-// 📈 CHART 1: Category Donut — SMALLER
+// 📈 CHART 1: Category Donut
 // ============================================================
 function CategoryDonut({
   data,
@@ -299,14 +180,14 @@ function CategoryDonut({
 }): React.JSX.Element {
   const cx = 100;
   const cy = 100;
-  const ro = 88; // was 96 → smaller
-  const ri = 60; // was 63 → smaller
+  const ro = 88;
+  const ri = 60;
   const arcs = buildArcs(data);
 
   return (
     <svg
       viewBox="0 0 200 200"
-      className="w-full max-w-[180px] h-auto mx-auto block" // was 240
+      className="w-full max-w-[180px] h-auto mx-auto block"
     >
       {arcs.map((a) => {
         const p = polar(cx, cy, (ro + ri) / 2, a.mid);
@@ -344,15 +225,15 @@ function CategoryDonut({
 }
 
 // ============================================================
-// 📈 CHART 2: Top 7 Products — SMALLER
+// 📈 CHART 2: Top 7 Products
 // ============================================================
 function Top7ProductsChart({
   data,
 }: {
   data: Array<{ name: string; qty: number }>;
 }): React.JSX.Element {
-  const W = 320; // was 340
-  const H = 150; // was 170
+  const W = 320;
+  const H = 150;
   const pad = { top: 16, right: 8, bottom: 26, left: 28 };
   const iW = W - pad.left - pad.right;
   const iH = H - pad.top - pad.bottom;
@@ -360,7 +241,7 @@ function Top7ProductsChart({
   const maxQty = Math.max(...data.map((d) => d.qty), 1);
   const scale = niceScale(maxQty, 4);
   const groupW = iW / data.length;
-  const barW = Math.min(groupW * 0.4, 26); // narrower bars
+  const barW = Math.min(groupW * 0.4, 26);
 
   const tierColor = (q: number): string => {
     const r = q / maxQty;
@@ -445,7 +326,7 @@ function Top7ProductsChart({
 }
 
 // ============================================================
-// 📈 CHART 3: Inventory Value by Category — SMALLER
+// 📈 CHART 3: Inventory Value by Category
 // ============================================================
 function InventoryValueByCategoryChart({
   data,
@@ -456,15 +337,15 @@ function InventoryValueByCategoryChart({
   const maxVal = Math.max(...rows.map((d) => d.value), 1);
   const scale = niceScale(maxVal, 4);
 
-  const W = 320; // was 340
-  const labelW = 76; // was 84
+  const W = 320;
+  const labelW = 76;
   const x0 = labelW + 6;
-  const cw = 190; // was 200
-  const barH = 14; // was 16
-  const gap = 8; // was 9
+  const cw = 190;
+  const barH = 14;
+  const gap = 8;
   const top = 6;
   const axisY = top + rows.length * (barH + gap) - gap + 8;
-  const H = axisY + 22; // was +24
+  const H = axisY + 22;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block">
@@ -553,7 +434,7 @@ function InventoryValueByCategoryChart({
 }
 
 // ============================================================
-// 📈 CHART 4: Revenue by Category — SMALLER (matches left donut)
+// 📈 CHART 4: Revenue by Category
 // ============================================================
 function RevenueByCategoryChart({
   data,
@@ -562,12 +443,12 @@ function RevenueByCategoryChart({
   data: Array<{ name: string; value: number }>;
   tr: ChartsT;
 }): React.JSX.Element {
-  const W = 300; // was 320
-  const H = 200; // was 240
+  const W = 300;
+  const H = 200;
   const cx = W / 2;
   const cy = H / 2;
-  const ro = 78; // was 92
-  const ri = 28; // was 32
+  const ro = 78;
+  const ri = 28;
   const rMid = (ro + ri) / 2;
   const ringW = ro - ri;
   const CHAR_W = 4.2;
@@ -576,7 +457,7 @@ function RevenueByCategoryChart({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="w-full max-w-[300px] h-auto mx-auto block" // was 320
+      className="w-full max-w-[300px] h-auto mx-auto block"
     >
       {arcs.map((a) => {
         const arcLen = (2 * Math.PI * rMid * a.pct) / 100;
@@ -664,175 +545,91 @@ function RevenueByCategoryChart({
 }
 
 // ============================================================
-// 🚀 MAIN INDEPENDENT COMPONENT (zero props)
+// 🚀 MAIN COMPONENT (Connected to Backend)
 // ============================================================
 export default function InventoryCharts(): React.JSX.Element {
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
+  const [data, setData] = useState<{
+    categoryDonut: Array<{ name: string; value: number }>;
+    top7Products: Array<{ name: string; qty: number }>;
+    inventoryValueByCategory: Array<{ name: string; value: number }>;
+    revenueByCategory: Array<{ name: string; value: number }>;
+  }>({
+    categoryDonut: [],
+    top7Products: [],
+    inventoryValueByCategory: [],
+    revenueByCategory: [],
+  });
+  const [loading, setLoading] = useState(true);
   const tr = T[language] as ChartsT;
   const isRTL = isRTLLang(language);
 
-  const [products, setProducts] = useState<Product[]>(() =>
-    readList<Product>(PRODUCTS_KEY)
-  );
-  const [documents, setDocuments] = useState<SalesDocument[]>(() =>
-    readList<SalesDocument>(DOCUMENTS_KEY)
-  );
-
+  // Sync language changes
   useEffect(() => {
-    const reload = (): void => {
-      setProducts(readList<Product>(PRODUCTS_KEY));
-      setDocuments(readList<SalesDocument>(DOCUMENTS_KEY));
-    };
-    const syncLang = (): void => setLanguage(getStoredLanguage());
-
-    window.addEventListener('focus', reload);
-    window.addEventListener('storage', reload);
+    const syncLang = () => setLanguage(getStoredLanguage());
     window.addEventListener('storage', syncLang);
     window.addEventListener('focus', syncLang);
-    window.addEventListener(
-      'zakhira:inventory-updated',
-      reload as EventListener
-    );
-    window.addEventListener('zakhira:sales-updated', reload as EventListener);
-
     return () => {
-      window.removeEventListener('focus', reload);
-      window.removeEventListener('storage', reload);
       window.removeEventListener('storage', syncLang);
       window.removeEventListener('focus', syncLang);
-      window.removeEventListener(
-        'zakhira:inventory-updated',
-        reload as EventListener
-      );
-      window.removeEventListener(
-        'zakhira:sales-updated',
-        reload as EventListener
-      );
     };
   }, []);
 
-  // ==========================================================
-  // Revenue-by-category computation (product lookup by
-  // productId → sku → name to resolve missing category)
-  // ==========================================================
-  const revenueByCategory = useMemo(() => {
-    const validInvoices = documents.filter(
-      (d) => d.documentType === 'invoice' && d.status === 'Approved'
-    );
-
-    const byId = new Map<string, Product>();
-    const bySku = new Map<string, Product>();
-    const byName = new Map<string, Product>();
-    products.forEach((p) => {
-      if (p.id) byId.set(String(p.id), p);
-      if (p.sku) bySku.set(norm(p.sku), p);
-      if (p.name) byName.set(norm(p.name), p);
-    });
-
-    const findProduct = (l: SalesDocLine): Product | undefined =>
-      (l.productId ? byId.get(String(l.productId)) : undefined) ||
-      (l.sku ? bySku.get(norm(l.sku)) : undefined) ||
-      (l.material ? byName.get(norm(l.material)) : undefined);
-
-    const categoryRevenueMap = new Map<string, number>();
-
-    for (const d of validInvoices) {
-      for (const l of d.lines || []) {
-        const prod = findProduct(l);
-        const qty = Number(l.quantity || 0);
-        const unit = Number(l.unitPrice ?? l.price ?? prod?.price ?? 0);
-        const revenue = Number(l.lineTotal || 0) || qty * unit;
-
-        const lineCat = (l.category || '').trim();
-        const prodCat = (prod?.category || '').trim();
-        const cat =
-          (lineCat && lineCat !== 'Uncategorized' ? lineCat : '') ||
-          (prodCat && prodCat !== 'Uncategorized' ? prodCat : '') ||
-          'Uncategorized';
-
-        categoryRevenueMap.set(
-          cat,
-          (categoryRevenueMap.get(cat) || 0) + revenue
-        );
-      }
+  // Fetch data from Supabase
+  const fetchCharts = async () => {
+    try {
+      setLoading(true);
+      const result = await inventoryChartsService.getChartData();
+      setData(result);
+    } catch (err: any) {
+      console.error('Failed to load inventory charts:', err.message);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    return Array.from(categoryRevenueMap.entries())
-      .map(([name, value]) => ({ name, value: roundMoney(value) }))
-      .sort((a, b) => b.value - a.value);
-  }, [documents, products]);
+  useEffect(() => {
+    fetchCharts();
+  }, []);
 
-  // ==========================================================
-  // Chart data — real first, fallback only if empty
-  // ==========================================================
-  const chartData = useMemo(() => {
-    const active = products.filter((p) => p.active !== false);
-
-    const catValueMap = new Map<string, number>();
-    active.forEach((p) => {
-      const cat = getCategory(p);
-      const qty = getQty(p);
-      const cost = getCost(p);
-      if (qty > 0 && cost > 0) {
-        catValueMap.set(cat, (catValueMap.get(cat) || 0) + qty * cost);
-      }
-    });
-
-    const realCategoryValues = Array.from(catValueMap.entries())
-      .map(([name, value]) => ({ name, value: roundMoney(value) }))
-      .sort((a, b) => b.value - a.value);
-
-    const realCategoryClean = realCategoryValues.filter(
-      (d) => d.name !== 'Uncategorized' && d.value > 0
-    );
-
-    const revenueAll = revenueByCategory.filter((d) => d.value > 0);
-    const revenueNamed = revenueAll.filter((d) => d.name !== 'Uncategorized');
-    const realRevenue = revenueNamed.length > 0 ? revenueNamed : revenueAll;
-
-    const hasInv = realCategoryClean.length > 0;
-    const hasRevenue = realRevenue.length > 0;
-
-    // Top 7 from approved invoice lines
-    const productMap = new Map<string, number>();
-    const byId = new Map<string, Product>();
-    const bySku = new Map<string, Product>();
-    const byName = new Map<string, Product>();
-    products.forEach((p) => {
-      if (p.id) byId.set(String(p.id), p);
-      if (p.sku) bySku.set(norm(p.sku), p);
-      if (p.name) byName.set(norm(p.name), p);
-    });
-    const findProduct = (l: SalesDocLine): Product | undefined =>
-      (l.productId ? byId.get(String(l.productId)) : undefined) ||
-      (l.sku ? bySku.get(norm(l.sku)) : undefined) ||
-      (l.material ? byName.get(norm(l.material)) : undefined);
-
-    for (const d of documents.filter(
-      (x) => x.documentType === 'invoice' && x.status === 'Approved'
-    )) {
-      for (const l of d.lines || []) {
-        const prod = findProduct(l);
-        const name = l.material || prod?.name || 'Unknown';
-        const qty = Number(l.quantity || 0);
-        productMap.set(name, (productMap.get(name) || 0) + qty);
-      }
-    }
-    const realTop7 = Array.from(productMap.entries())
-      .map(([name, qty]) => ({ name, qty }))
-      .filter((d) => d.qty > 0)
-      .sort((a, b) => b.qty - a.qty)
-      .slice(0, 7);
-
-    return {
-      categoryDonut: hasInv ? realCategoryClean : FALLBACK_DONUT,
-      inventoryValueByCategory: hasInv ? realCategoryClean : FALLBACK_INV_VALUE,
-      top7: realTop7.length > 0 ? realTop7 : FALLBACK_TOP7,
-      revenueByCategory: hasRevenue ? realRevenue : FALLBACK_REVENUE,
+  // Refresh when inventory or sales change
+  useEffect(() => {
+    const reload = () => fetchCharts();
+    window.addEventListener('zakhira:inventory-updated', reload);
+    window.addEventListener('zakhira:sales-updated', reload);
+    return () => {
+      window.removeEventListener('zakhira:inventory-updated', reload);
+      window.removeEventListener('zakhira:sales-updated', reload);
     };
-  }, [products, documents, revenueByCategory]);
+  }, []);
 
-  const noData = chartData.categoryDonut.length === 0;
+  const noData =
+    data.categoryDonut.length === 0 &&
+    data.top7Products.length === 0 &&
+    data.inventoryValueByCategory.length === 0 &&
+    data.revenueByCategory.length === 0;
+
+  // ============================================================
+  // ✅ LOADING STATE (Blank ke bajaye spinner)
+  // ============================================================
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-10">
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className="w-8 h-8 rounded-full border-4 animate-spin"
+            style={{
+              borderColor: `${THEME.mutedOlive}30`,
+              borderTopColor: THEME.warmBrass,
+            }}
+          />
+          <p className="text-[12px]" style={{ color: THEME.mutedOlive }}>
+            {tr.loading}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-3">
@@ -859,7 +656,7 @@ export default function InventoryCharts(): React.JSX.Element {
           >
             {tr.categoryProductDonut}
           </h3>
-          <CategoryDonut data={chartData.categoryDonut} />
+          <CategoryDonut data={data.categoryDonut} />
         </div>
 
         <div
@@ -875,7 +672,7 @@ export default function InventoryCharts(): React.JSX.Element {
           >
             {tr.top7Products}
           </h3>
-          <Top7ProductsChart data={chartData.top7} />
+          <Top7ProductsChart data={data.top7Products} />
         </div>
 
         <div
@@ -892,7 +689,7 @@ export default function InventoryCharts(): React.JSX.Element {
             {tr.inventoryValueByCategory}
           </h3>
           <InventoryValueByCategoryChart
-            data={chartData.inventoryValueByCategory}
+            data={data.inventoryValueByCategory}
           />
         </div>
 
@@ -910,7 +707,7 @@ export default function InventoryCharts(): React.JSX.Element {
             {tr.revenueByCategory}
           </h3>
           <RevenueByCategoryChart
-            data={chartData.revenueByCategory}
+            data={data.revenueByCategory}
             tr={tr}
           />
         </div>

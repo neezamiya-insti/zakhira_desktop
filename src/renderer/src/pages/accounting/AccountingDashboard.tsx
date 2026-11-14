@@ -1,18 +1,17 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  accountingDashboardService,
+  type DashboardMetrics,
+} from '@renderer/services/accountingdashboardservice';
 
-
-// ============================================================
-// 🎨 THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
+// Extra accent colours used only by the dashboard cards
+// (agar chahein to inhein theme.ts mein move kar sakte hain)
+const ACCENT = {
   success: '#3B7A57',
   danger: '#B85C4A',
   purple: '#8A6A9E',
@@ -49,6 +48,8 @@ const DASH_T = {
     receivables: 'Receivables',
     cogs: 'Cost of Goods Sold',
     otherExpenses: 'Other Expenses',
+    loadError: 'Could not load financial overview.',
+    retry: 'Retry',
   },
   ar: {
     financialOverview: 'نظرة مالية',
@@ -59,6 +60,8 @@ const DASH_T = {
     receivables: 'المستحقات المدينة',
     cogs: 'تكلفة البضاعة المباعة',
     otherExpenses: 'مصروفات أخرى',
+    loadError: 'تعذر تحميل النظرة المالية.',
+    retry: 'إعادة المحاولة',
   },
   ur: {
     financialOverview: 'مالیاتی جائزہ',
@@ -69,6 +72,8 @@ const DASH_T = {
     receivables: 'وصولی',
     cogs: 'فروخت شدہ اشیاء کی لاگت',
     otherExpenses: 'دیگر اخراجات',
+    loadError: 'مالیاتی جائزہ لوڈ نہیں ہو سکا۔',
+    retry: 'دوبارہ کوشش کریں',
   },
   hi: {
     financialOverview: 'वित्तीय अवलोकन',
@@ -79,87 +84,10 @@ const DASH_T = {
     receivables: 'प्राप्य',
     cogs: 'बेचे गए माल की लागत',
     otherExpenses: 'अन्य खर्च',
+    loadError: 'वित्तीय अवलोकन लोड नहीं हो सका।',
+    retry: 'पुनः प्रयास',
   },
 } as const;
-
-// ============================================================
-// 📦 TYPES
-// ============================================================
-type TransactionType = 'In' | 'Out' | 'Return';
-
-type Transaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: TransactionType;
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: string;
-};
-
-type SalesDocLine = {
-  id: string;
-  quantity?: number;
-  costPrice?: number;
-};
-
-type SalesDocument = {
-  id: string;
-  orderNumber: string;
-  issueDate?: string;
-  createdAt?: string;
-  lines?: SalesDocLine[];
-};
-
-type ExpenseRecord = {
-  id: string;
-  date: string;
-  category: string;
-  amount: number;
-};
-
-// ============================================================
-// 🔑 STORAGE KEYS
-// ============================================================
-const TRANSACTIONS_STORAGE_KEY = 'zakhira_transactions';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-const EXPENSES_KEY = 'zakhira_expenses';
-
-const loadTransactions = (): Transaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
-
-const loadDocuments = (): SalesDocument[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
-
-const loadExpenses = (): ExpenseRecord[] => {
-  try {
-    const raw = localStorage.getItem(EXPENSES_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
 
 // ============================================================
 // 🔧 HELPERS
@@ -171,70 +99,9 @@ const formatPrice = (n: number, lang: Language = 'en'): string => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
-  return `${n < 0 ? '-' : ''}${currency} ${formatted}`.trim();
-};
-
-const isReturnEntry = (t: Transaction): boolean =>
-  t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned');
-
-const receivedAmount = (t: Transaction): number => {
-  if (t.status === 'Paid') return t.amount;
-  return 0;
-};
-
-const dueAmount = (t: Transaction): number => {
-  if (t.status === 'Paid') return 0;
-  if (t.status === 'Partially Paid' || t.status === 'Pending') return t.amount;
-  return 0;
-};
-
-// ============================================================
-// 🧮 METRICS
-// ============================================================
-const computeMetrics = (
-  transactions: Transaction[],
-  documents: SalesDocument[],
-  expenses: ExpenseRecord[]
-) => {
-  const ins = transactions.filter((t) => t.type === 'In');
-  const returns = transactions.filter(isReturnEntry);
-  const outs = transactions.filter(
-    (t) => t.type === 'Out' && t.status !== 'Returned'
-  );
-
-  const grossSales = ins.reduce((s, t) => s + t.amount, 0);
-  const totalReturns = returns.reduce((s, t) => s + t.amount, 0);
-  const totalRevenue = grossSales - totalReturns;
-
-  let cogs = 0;
-  for (const d of documents) {
-    for (const l of d.lines || []) {
-      const qty = Number(l.quantity || 0);
-      const cost = Number(l.costPrice || 0);
-      if (qty > 0 && cost > 0) cogs += qty * cost;
-    }
-  }
-  if (cogs === 0 && totalRevenue > 0) cogs = totalRevenue * 0.6;
-
-  const otherExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const netProfit = totalRevenue - cogs - otherExpenses;
-
-  const cashInflow = ins.reduce((s, t) => s + receivedAmount(t), 0);
-  const cashOutflow = outs.reduce((s, t) => s + t.amount, 0) + otherExpenses;
-  const cashInBank = cashInflow - cashOutflow;
-
-  const receivables = ins.reduce((s, t) => s + dueAmount(t), 0);
-  const payables = outs.reduce((s, t) => s + dueAmount(t), 0);
-
-  return {
-    totalRevenue,
-    netProfit,
-    cashInBank,
-    payables,
-    receivables,
-    cogs,
-    otherExpenses,
-  };
+  // "-0" na dikhe: sirf tab minus lagao jab rounded value sach mein negative ho
+  const negative = n < 0 && Number(abs.toFixed(2)) !== 0;
+  return `${negative ? '-' : ''}${currency} ${formatted}`.trim();
 };
 
 // ============================================================
@@ -285,6 +152,11 @@ const Icons = {
     <svg {...svgBase} className="w-4 h-4">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v10M9 9h4a2 2 0 0 1 0 4H9h4a2 2 0 0 1 0 4H9" />
+    </svg>
+  ),
+  alert: (
+    <svg {...svgBase} className="w-4 h-4">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />
     </svg>
   ),
 };
@@ -349,39 +221,50 @@ export default function AccountingDashboard(): React.JSX.Element {
   const tr = DASH_T[language];
   const rtl = isRTLLang(language);
 
-  const [transactions, setTransactions] = useState<Transaction[]>(
-    loadTransactions
-  );
-  const [documents, setDocuments] = useState<SalesDocument[]>(loadDocuments);
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>(loadExpenses);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [error, setError] = useState(false);
+
+  // sirf sabse naya request apna result set kare (race condition se bachao)
+  const requestId = useRef(0);
+
+  const load = useCallback(async (): Promise<void> => {
+    const myId = ++requestId.current;
+    try {
+      const m = await accountingDashboardService.getMetrics();
+      if (myId !== requestId.current) return;
+      setMetrics(m);
+      setError(false);
+    } catch (e) {
+      console.error('Dashboard metrics failed', e);
+      if (myId !== requestId.current) return;
+      setError(true);
+    }
+  }, []);
 
   useEffect(() => {
+    void load();
+
     const reload = (): void => {
-      setTransactions(loadTransactions());
-      setDocuments(loadDocuments());
-      setExpenses(loadExpenses());
+      void load();
     };
     window.addEventListener('focus', reload);
     window.addEventListener('zakhira:sales-updated', reload as EventListener);
-    window.addEventListener('storage', reload);
     return () => {
+      requestId.current++; // unmount ke baad koi setState na ho
       window.removeEventListener('focus', reload);
       window.removeEventListener(
         'zakhira:sales-updated',
         reload as EventListener
       );
-      window.removeEventListener('storage', reload);
     };
-  }, []);
+  }, [load]);
 
-  const metrics = useMemo(
-    () => computeMetrics(transactions, documents, expenses),
-    [transactions, documents, expenses]
-  );
+  // jab tak data nahi aaya "—" dikhao
+  const show = (n: number | undefined): string =>
+    metrics && n !== undefined ? formatPrice(n, language) : '—';
 
   return (
     <div dir={rtl ? 'rtl' : 'ltr'} className="space-y-4">
-      {/* 📊 FINANCIAL OVERVIEW — clean flat cards like main dashboard */}
       <div
         className="rounded-2xl p-3.5"
         style={{
@@ -389,63 +272,83 @@ export default function AccountingDashboard(): React.JSX.Element {
           border: '1px solid rgba(102,116,90,0.1)',
         }}
       >
-        <div className="flex items-center gap-2 mb-3">
-          <span style={{ color: THEME.warmBrass }}>{Icons.trendUp}</span>
-          <h3
-            className="text-[10px] font-bold uppercase tracking-wider"
-            style={{ color: THEME.deepForest }}
-          >
-            {tr.financialOverview}
-          </h3>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <span style={{ color: THEME.warmBrass }}>{Icons.trendUp}</span>
+            <h3
+              className="text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: THEME.deepForest }}
+            >
+              {tr.financialOverview}
+            </h3>
+          </div>
+
+          {error && (
+            <div
+              className="flex items-center gap-2 text-[10px] font-semibold"
+              style={{ color: THEME.charcoal }}
+            >
+              <span style={{ color: THEME.warmBrass }}>{Icons.alert}</span>
+              <span>{tr.loadError}</span>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="font-bold hover:underline cursor-pointer"
+                style={{ color: THEME.warmBrass }}
+              >
+                {tr.retry}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
           <FinancialCard
             label={tr.netProfit}
-            value={formatPrice(metrics.netProfit, language)}
-            color={metrics.netProfit >= 0 ? THEME.success : THEME.danger}
+            value={show(metrics?.netProfit)}
+            color={
+              metrics && metrics.netProfit < 0 ? ACCENT.danger : ACCENT.success
+            }
             icon={Icons.wallet}
           />
           <FinancialCard
             label={tr.totalRevenue}
-            value={formatPrice(metrics.totalRevenue, language)}
+            value={show(metrics?.totalRevenue)}
             color={THEME.deepForest}
             icon={Icons.trendUp}
           />
           <FinancialCard
             label={tr.cashInBank}
-            value={formatPrice(metrics.cashInBank, language)}
+            value={show(metrics?.cashInBank)}
             color={THEME.warmBrass}
             icon={Icons.bank}
           />
           <FinancialCard
             label={tr.receivables}
-            value={formatPrice(metrics.receivables, language)}
-            color={THEME.purple}
+            value={show(metrics?.receivables)}
+            color={ACCENT.purple}
             icon={Icons.arrowDown}
           />
           <FinancialCard
             label={tr.payables}
-            value={formatPrice(metrics.payables, language)}
-            color={THEME.danger}
+            value={show(metrics?.payables)}
+            color={ACCENT.danger}
             icon={Icons.arrowUp}
           />
           <FinancialCard
             label={tr.cogs}
-            value={formatPrice(metrics.cogs, language)}
+            value={show(metrics?.cogs)}
             color={THEME.mutedOlive}
             icon={Icons.box}
           />
           <FinancialCard
             label={tr.otherExpenses}
-            value={formatPrice(metrics.otherExpenses, language)}
-            color={THEME.pink}
+            value={show(metrics?.otherExpenses)}
+            color={ACCENT.pink}
             icon={Icons.coin}
           />
         </div>
       </div>
-
-  
     </div>
   );
 }

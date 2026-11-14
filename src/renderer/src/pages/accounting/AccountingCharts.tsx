@@ -1,21 +1,20 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  accountingChartsService,
+  type ChartsData,
+} from '@renderer/services/accountingchartsservice';
 
-// ============================================================
-// 🎨 THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
+// Extra accent colours used only by the charts
+// (agar chahein to inhein theme.ts mein move kar sakte hain)
+const ACCENT = {
   success: '#3B7A57',
   danger: '#B85C4A',
   purple: '#8A6A9E',
-  pink: '#C26B80',
 };
 
 // ============================================================
@@ -57,7 +56,6 @@ const DASH_T = {
     inflow: 'Inflow',
     outflow: 'Outflow',
     noChartData: 'No data for selected period',
-    purchases: 'Purchases',
     salaries: 'Salaries',
     personalUse: 'Personal Use',
     other: 'Other',
@@ -68,6 +66,9 @@ const DASH_T = {
     levelHigh: 'High',
     levelPeak: 'Peak',
     activity: 'Cash activity',
+    loading: 'Loading...',
+    loadError: 'Could not load charts.',
+    retry: 'Retry',
   },
   ar: {
     revenueVsExpenses: 'الإيرادات مقابل المصروفات مقابل الربح',
@@ -80,7 +81,6 @@ const DASH_T = {
     inflow: 'تدفق داخل',
     outflow: 'تدفق خارج',
     noChartData: 'لا توجد بيانات للفترة المحددة',
-    purchases: 'المشتريات',
     salaries: 'الرواتب',
     personalUse: 'استخدام شخصي',
     other: 'أخرى',
@@ -91,6 +91,9 @@ const DASH_T = {
     levelHigh: 'مرتفع',
     levelPeak: 'ذروة',
     activity: 'النشاط النقدي',
+    loading: 'جارٍ التحميل...',
+    loadError: 'تعذر تحميل الرسوم البيانية.',
+    retry: 'إعادة المحاولة',
   },
   ur: {
     revenueVsExpenses: 'آمدنی بمقابلہ اخراجات بمقابلہ منافع',
@@ -103,7 +106,6 @@ const DASH_T = {
     inflow: 'آمد',
     outflow: 'اخراج',
     noChartData: 'منتخب مدت کے لیے کوئی ڈیٹا نہیں',
-    purchases: 'خریداری',
     salaries: 'تنخواہیں',
     personalUse: 'ذاتی استعمال',
     other: 'دیگر',
@@ -114,6 +116,9 @@ const DASH_T = {
     levelHigh: 'زیادہ',
     levelPeak: 'عروج',
     activity: 'کیش سرگرمی',
+    loading: 'لوڈ ہو رہا ہے...',
+    loadError: 'چارٹس لوڈ نہیں ہو سکے۔',
+    retry: 'دوبارہ کوشش کریں',
   },
   hi: {
     revenueVsExpenses: 'राजस्व बनाम खर्च बनाम लाभ',
@@ -126,7 +131,6 @@ const DASH_T = {
     inflow: 'आवक',
     outflow: 'जावक',
     noChartData: 'चयनित अवधि के लिए कोई डेटा नहीं',
-    purchases: 'खरीद',
     salaries: 'वेतन',
     personalUse: 'व्यक्तिगत उपयोग',
     other: 'अन्य',
@@ -137,89 +141,13 @@ const DASH_T = {
     levelHigh: 'उच्च',
     levelPeak: 'चरम',
     activity: 'नकद गतिविधि',
+    loading: 'लोड हो रहा है...',
+    loadError: 'चार्ट लोड नहीं हो सके।',
+    retry: 'पुनः प्रयास',
   },
 } as const;
 
 type DashT = { [K in keyof (typeof DASH_T)['en']]: string };
-
-// ============================================================
-// 📦 TYPES
-// ============================================================
-type TransactionType = 'In' | 'Out' | 'Return';
-
-type Transaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: TransactionType;
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: string;
-};
-
-type SalesDocLine = {
-  id: string;
-  quantity?: number;
-  costPrice?: number;
-};
-
-type SalesDocument = {
-  id: string;
-  orderNumber: string;
-  issueDate?: string;
-  createdAt?: string;
-  lines?: SalesDocLine[];
-};
-
-type ExpenseRecord = {
-  id: string;
-  date: string;
-  category: string;
-  amount: number;
-};
-
-// ============================================================
-// 🔑 STORAGE KEYS (must match parent)
-// ============================================================
-const TRANSACTIONS_STORAGE_KEY = 'zakhira_transactions';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-const EXPENSES_KEY = 'zakhira_expenses';
-
-const loadTransactions = (): Transaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
-
-const loadDocuments = (): SalesDocument[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
-
-const loadExpenses = (): ExpenseRecord[] => {
-  try {
-    const raw = localStorage.getItem(EXPENSES_KEY);
-    if (!raw) return [];
-    const p = JSON.parse(raw);
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
-};
 
 // ============================================================
 // 🔧 HELPERS
@@ -231,27 +159,14 @@ const formatPrice = (n: number, lang: Language = 'en'): string => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
-  return `${n < 0 ? '-' : ''}${currency} ${formatted}`;
+  const negative = n < 0 && Number(abs.toFixed(2)) !== 0;
+  return `${negative ? '-' : ''}${currency} ${formatted}`;
 };
 
 const formatShortMonth = (key: string): string => {
   const [y, m] = key.split('-');
   const d = new Date(Number(y), Number(m) - 1, 1);
   return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
-};
-
-const monthKeyOf = (iso: string): string | null => {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const isReturnEntry = (t: Transaction): boolean =>
-  t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned');
-
-const receivedAmount = (t: Transaction): number => {
-  if (t.status === 'Paid') return t.amount;
-  return 0;
 };
 
 const compact = (n: number): string => {
@@ -274,7 +189,7 @@ const niceMax = (v: number): number => {
 };
 
 // ============================================================
-// 🧮 METRICS (charts only)
+// 🧮 VIEW TYPES
 // ============================================================
 type MonthlyBucket = {
   key: string;
@@ -293,151 +208,24 @@ type HeatData = {
   cells: number[][];
 };
 
-const computeMetrics = (
-  transactions: Transaction[],
-  documents: SalesDocument[],
-  expenses: ExpenseRecord[],
-  tr: DashT
-) => {
-  const ins = transactions.filter((t) => t.type === 'In');
-  const returns = transactions.filter(isReturnEntry);
-  const outs = transactions.filter(
-    (t) => t.type === 'Out' && t.status !== 'Returned'
-  );
-
-  const grossSales = ins.reduce((s, t) => s + t.amount, 0);
-  const totalReturns = returns.reduce((s, t) => s + t.amount, 0);
-  const totalRevenue = grossSales - totalReturns;
-
-  let cogs = 0;
-  for (const d of documents) {
-    for (const l of d.lines || []) {
-      const qty = Number(l.quantity || 0);
-      const cost = Number(l.costPrice || 0);
-      if (qty > 0 && cost > 0) cogs += qty * cost;
-    }
-  }
-  if (cogs === 0 && totalRevenue > 0) cogs = totalRevenue * 0.6;
-
-  const otherExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-
-  const purchasesTotal = outs.reduce((s, t) => s + t.amount, 0);
-  const expByCat: Record<string, number> = {};
-  for (const e of expenses) {
-    const cat = e.category || 'Other';
-    expByCat[cat] = (expByCat[cat] || 0) + e.amount;
-  }
-
-  const expensePie: PieSlice[] = [
-    { name: tr.purchases, amount: purchasesTotal, color: THEME.deepForest },
-    { name: tr.cogs, amount: cogs, color: THEME.warmBrass },
-    { name: tr.salaries, amount: expByCat['Salaries'] || 0, color: THEME.purple },
-    {
-      name: tr.personalUse,
-      amount: expByCat['Personal Use'] || 0,
-      color: THEME.danger,
-    },
-    { name: tr.other, amount: expByCat['Other'] || 0, color: THEME.mutedOlive },
-  ].filter((s) => s.amount > 0);
-
-  const bucketsMap = new Map<string, MonthlyBucket>();
-
-  const addToBucket = (dISO: string): MonthlyBucket | null => {
-    const key = monthKeyOf(dISO);
-    if (!key) return null;
-    let b = bucketsMap.get(key);
-    if (!b) {
-      b = {
-        key,
-        label: formatShortMonth(key),
-        revenue: 0,
-        expenses: 0,
-        profit: 0,
-        inflow: 0,
-        outflow: 0,
-      };
-      bucketsMap.set(key, b);
-    }
-    return b;
-  };
-
-  for (const t of transactions) {
-    const b = addToBucket(t.date);
-    if (!b) continue;
-    if (t.type === 'In') {
-      b.revenue += t.amount;
-      b.inflow += receivedAmount(t);
-    } else if (t.type === 'Return') {
-      b.revenue -= t.amount;
-      b.outflow += t.amount;
-    } else if (t.type === 'Out' && t.status !== 'Returned') {
-      b.expenses += t.amount;
-      b.outflow += t.amount;
-    }
-  }
-  for (const e of expenses) {
-    const b = addToBucket(e.date);
-    if (!b) continue;
-    b.expenses += e.amount;
-    b.outflow += e.amount;
-  }
-  bucketsMap.forEach((b) => {
-    b.profit = b.revenue - b.expenses;
-  });
-
-  const monthly = Array.from(bucketsMap.values()).sort((a, b) =>
-    a.key.localeCompare(b.key)
-  );
-
-  // Heatmap: weekday x last 6 months
-  const lastMonths = monthly.slice(-6);
-  const heatKeys = lastMonths.map((m) => m.key);
-  const heat: HeatData = {
-    labels: lastMonths.map((m) => m.label),
-    cells: Array.from({ length: 7 }, () => heatKeys.map(() => 0)),
-  };
-  const addHeat = (iso: string, amt: number): void => {
-    const d = new Date(iso);
-    const key = monthKeyOf(iso);
-    if (!key || isNaN(d.getTime())) return;
-    const ci = heatKeys.indexOf(key);
-    if (ci < 0) return;
-    heat.cells[d.getDay()][ci] += Math.abs(amt);
-  };
-  for (const t of transactions) {
-    if (t.type === 'In') addHeat(t.date, receivedAmount(t));
-    else if (t.type === 'Return') addHeat(t.date, t.amount);
-    else if (t.type === 'Out' && t.status !== 'Returned')
-      addHeat(t.date, t.amount);
-  }
-  for (const e of expenses) addHeat(e.date, e.amount);
-
-  return {
-    totalRevenue,
-    cogs,
-    otherExpenses,
-    expensePie,
-    monthly,
-    heat,
-  };
-};
-
 // ============================================================
 // 📈 CHARTS
 // ============================================================
 function EmptyChart({
   tr,
   height,
+  text,
 }: {
   tr: DashT;
   height: number;
+  text?: string;
 }): React.JSX.Element {
   return (
     <div
       className="flex items-center justify-center text-[11px] italic"
       style={{ height, color: THEME.mutedOlive }}
     >
-      {tr.noChartData}
+      {text ?? tr.noChartData}
     </div>
   );
 }
@@ -563,7 +351,7 @@ function RevenueExpensesProfitChart({
             y={yL(b.expenses)}
             width={barW}
             height={hL(b.expenses)}
-            fill={THEME.danger}
+            fill={ACCENT.danger}
           >
             <title>{`${b.label} — ${tr.expenses}: ${formatPrice(b.expenses)}`}</title>
           </rect>
@@ -617,7 +405,7 @@ const HEAT_LEVELS: {
   { key: 'levelLow', color: THEME.mutedOlive, opacity: 0.4 },
   { key: 'levelNormal', color: THEME.mutedOlive, opacity: 1 },
   { key: 'levelHigh', color: THEME.warmBrass, opacity: 1 },
-  { key: 'levelPeak', color: THEME.danger, opacity: 1 },
+  { key: 'levelPeak', color: ACCENT.danger, opacity: 1 },
 ];
 
 const heatLevel = (v: number, max: number): number => {
@@ -736,10 +524,7 @@ function CashFlowHeatChart({
 
 // ------------------------------------------------------------
 // 3) MULTI-SERIES HORIZONTAL BAR — Monthly Overview
-// ------------------------------------------------------------
-// ------------------------------------------------------------
-// 3) MULTI-SERIES HORIZONTAL BAR — Monthly Overview
-//    Bars now match the thickness of the Revenue vs Expenses chart
+//    Bars match the thickness of the Revenue vs Expenses chart
 // ------------------------------------------------------------
 function MonthlyCheckChart({
   data,
@@ -757,12 +542,11 @@ function MonthlyCheckChart({
     color: string;
   }[] = [
     { key: 'revenue', label: tr.revenue, color: THEME.deepForest },
-    { key: 'expenses', label: tr.expenses, color: THEME.danger },
-    { key: 'inflow', label: tr.inflow, color: THEME.success },
+    { key: 'expenses', label: tr.expenses, color: ACCENT.danger },
+    { key: 'inflow', label: tr.inflow, color: ACCENT.success },
     { key: 'outflow', label: tr.outflow, color: THEME.warmBrass },
   ];
 
-  // ✅ Match thickness to Revenue vs Expenses chart (~26px per bar)
   const barH = 26;
   const barGap = 6;
   const groupGap = 26;
@@ -790,7 +574,6 @@ function MonthlyCheckChart({
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
       >
-        {/* vertical dashed grid + x labels */}
         {ticks.map((r) => (
           <g key={r}>
             <line
@@ -1016,54 +799,133 @@ function ExpensePieChart({
 }
 
 // ============================================================
-// 🚀 MAIN INDEPENDENT COMPONENT (zero props)
+// 🚀 MAIN COMPONENT (zero props — data accountingChartsService se)
 // ============================================================
 export default function AccountingCharts(): React.JSX.Element {
   const language = getStoredLanguage();
   const tr = DASH_T[language];
   const rtl = isRTLLang(language);
 
-  const [transactions, setTransactions] = useState<Transaction[]>(
-    loadTransactions
-  );
-  const [documents, setDocuments] = useState<SalesDocument[]>(loadDocuments);
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>(loadExpenses);
+  const [data, setData] = useState<ChartsData | null>(null);
+  const [error, setError] = useState(false);
+
+  // sirf sabse naya request apna result set kare (race condition se bachao)
+  const requestId = useRef(0);
+
+  const load = useCallback(async (): Promise<void> => {
+    const myId = ++requestId.current;
+    try {
+      const d = await accountingChartsService.getChartsData();
+      if (myId !== requestId.current) return;
+      setData(d);
+      setError(false);
+    } catch (e) {
+      console.error('Charts data failed', e);
+      if (myId !== requestId.current) return;
+      setError(true);
+    }
+  }, []);
 
   useEffect(() => {
+    void load();
+
     const reload = (): void => {
-      setTransactions(loadTransactions());
-      setDocuments(loadDocuments());
-      setExpenses(loadExpenses());
+      void load();
     };
     window.addEventListener('focus', reload);
     window.addEventListener('zakhira:sales-updated', reload as EventListener);
-    window.addEventListener('storage', reload);
     return () => {
+      requestId.current++; // unmount ke baad koi setState na ho
       window.removeEventListener('focus', reload);
       window.removeEventListener(
         'zakhira:sales-updated',
         reload as EventListener
       );
-      window.removeEventListener('storage', reload);
     };
-  }, []);
+  }, [load]);
 
-  const metrics = useMemo(
-    () => computeMetrics(transactions, documents, expenses, tr),
-    [transactions, documents, expenses, tr]
-  );
+  const view = useMemo(() => {
+    if (!data) return null;
+
+    // agar poori window mein koi activity nahi to "No data" dikhao
+    const hasActivity = data.months.some(
+      (m) =>
+        m.revenue !== 0 || m.expenses !== 0 || m.inflow !== 0 || m.outflow !== 0
+    );
+
+    const monthly: MonthlyBucket[] = hasActivity
+      ? data.months.map((m) => ({ ...m, label: formatShortMonth(m.key) }))
+      : [];
+
+    const heat: HeatData = hasActivity
+      ? { labels: monthly.map((m) => m.label), cells: data.heat }
+      : { labels: [], cells: [] };
+
+    const t = data.expenseTotals;
+    const slices: PieSlice[] = [
+      { name: tr.cogs, amount: t.cogs, color: THEME.warmBrass },
+      { name: tr.salaries, amount: t.salaries, color: ACCENT.purple },
+      { name: tr.personalUse, amount: t.personalUse, color: ACCENT.danger },
+      { name: tr.other, amount: t.other, color: THEME.mutedOlive },
+    ].filter((s) => s.amount > 0);
+
+    return { monthly, heat, slices };
+  }, [data, tr]);
+
+  const cardStyle = {
+    backgroundColor: '#FFFFFF',
+    border: '1px solid rgba(102,116,90,0.1)',
+  } as const;
+
+  if (!view) {
+    return (
+      <div dir={rtl ? 'rtl' : 'ltr'}>
+        <div
+          className="rounded-2xl p-6 text-center text-[11px] flex items-center justify-center gap-2"
+          style={{ ...cardStyle, color: THEME.mutedOlive }}
+        >
+          {error ? (
+            <>
+              <span>{tr.loadError}</span>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="font-bold hover:underline cursor-pointer"
+                style={{ color: THEME.warmBrass }}
+              >
+                {tr.retry}
+              </button>
+            </>
+          ) : (
+            <span>{tr.loading}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div dir={rtl ? 'rtl' : 'ltr'}>
+      {error && (
+        <div
+          className="mb-3 flex items-center gap-2 text-[10px] font-semibold"
+          style={{ color: THEME.charcoal }}
+        >
+          <span>{tr.loadError}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="font-bold hover:underline cursor-pointer"
+            style={{ color: THEME.warmBrass }}
+          >
+            {tr.retry}
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* Revenue vs Expenses vs Profit */}
-        <div
-          className="rounded-2xl p-3.5 min-w-0"
-          style={{
-            backgroundColor: '#FFFFFF',
-            border: '1px solid rgba(102,116,90,0.1)',
-          }}
-        >
+        <div className="rounded-2xl p-3.5 min-w-0" style={cardStyle}>
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <h3
               className="text-[10px] font-bold uppercase tracking-wider"
@@ -1088,7 +950,7 @@ export default function AccountingCharts(): React.JSX.Element {
               >
                 <span
                   className="w-2 h-2 rounded-sm"
-                  style={{ background: THEME.danger }}
+                  style={{ background: ACCENT.danger }}
                 />
                 {tr.expenses}
               </span>
@@ -1104,58 +966,40 @@ export default function AccountingCharts(): React.JSX.Element {
               </span>
             </div>
           </div>
-          <RevenueExpensesProfitChart data={metrics.monthly} tr={tr} />
+          <RevenueExpensesProfitChart data={view.monthly} tr={tr} />
         </div>
 
         {/* Cash Flow (Heatmap) */}
-        <div
-          className="rounded-2xl p-3.5 min-w-0"
-          style={{
-            backgroundColor: '#FFFFFF',
-            border: '1px solid rgba(102,116,90,0.1)',
-          }}
-        >
+        <div className="rounded-2xl p-3.5 min-w-0" style={cardStyle}>
           <h3
             className="text-[10px] font-bold uppercase tracking-wider mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.cashFlow}
           </h3>
-          <CashFlowHeatChart heat={metrics.heat} tr={tr} language={language} />
+          <CashFlowHeatChart heat={view.heat} tr={tr} language={language} />
         </div>
 
         {/* Monthly Overview */}
-        <div
-          className="rounded-2xl p-3.5 min-w-0"
-          style={{
-            backgroundColor: '#FFFFFF',
-            border: '1px solid rgba(102,116,90,0.1)',
-          }}
-        >
+        <div className="rounded-2xl p-3.5 min-w-0" style={cardStyle}>
           <h3
             className="text-[10px] font-bold uppercase tracking-wider mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.monthlyCheck}
           </h3>
-          <MonthlyCheckChart data={metrics.monthly} tr={tr} />
+          <MonthlyCheckChart data={view.monthly} tr={tr} />
         </div>
 
         {/* Expense Breakdown */}
-        <div
-          className="rounded-2xl p-3.5 min-w-0"
-          style={{
-            backgroundColor: '#FFFFFF',
-            border: '1px solid rgba(102,116,90,0.1)',
-          }}
-        >
+        <div className="rounded-2xl p-3.5 min-w-0" style={cardStyle}>
           <h3
             className="text-[10px] font-bold uppercase tracking-wider mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.expenseBreakdown}
           </h3>
-          <ExpensePieChart slices={metrics.expensePie} tr={tr} />
+          <ExpensePieChart slices={view.slices} tr={tr} />
         </div>
       </div>
     </div>

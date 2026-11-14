@@ -4,19 +4,19 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import { customerService } from '@renderer/services/customerService';
+import {
+  salesService,
+  type SalesDocumentInput,
+} from '@renderer/services/salesService';
+import {
+  productService,
+  type Product as DbProduct,
+  type Category as DbCategory,
+} from '@renderer/services/productService';
 // ✅ Import the independent sibling — NO PROPS PASSED
 import RecordsSection from './RecordsSection';
-
-// ============================================================
-// THEME (self-contained)
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
 
 type Language = 'en' | 'ar' | 'ur' | 'hi';
 
@@ -653,7 +653,7 @@ type Translations = {
 // TYPES
 // ============================================================
 type Customer = {
-  /** PRIMARY KEY — equals normalized phone (with code) or, if empty, phoneAlt */
+  /** Customer id (uuid from the database) */
   id: string;
   name: string;
   company: string;
@@ -694,16 +694,15 @@ type PaymentRecord = {
   createdAt: string;
 };
 
-// ✅ NEW: optional fields for RecordsSection compatibility
 type DocumentLine = {
   id: string;
   productId: string;
   productImage?: string;
   material: string;
   sku: string;
-  category?: string; // ✅ Section 9
-  costPrice?: number; // ✅ Section 9
-  description?: string; // ✅ Section 9
+  category?: string;
+  costPrice?: number;
+  description?: string;
   quantity: number;
   unitPrice: number;
   discountType: 'percentage' | 'fixed';
@@ -711,7 +710,6 @@ type DocumentLine = {
   lineTotal: number;
 };
 
-// ✅ NEW: optional fields for RecordsSection compatibility
 type DocumentRecord = {
   id: string;
   documentType: DocumentType;
@@ -719,10 +717,10 @@ type DocumentRecord = {
   customerId: string;
   customerSnapshot: CustomerSnapshot;
   issueDate: string;
-  dueDate?: string; // ✅ Section 9 (auto = issueDate)
-  salesChannel?: 'Online' | 'Offline'; // ✅ Section 9 (auto = Offline)
-  tenantId?: string; // ✅ Section 9 (auto from user)
-  updatedAt?: string; // ✅ Section 9 (auto = createdAt)
+  dueDate?: string;
+  salesChannel?: 'Online' | 'Offline';
+  tenantId?: string;
+  updatedAt?: string;
   status: WorkflowStatus;
   currency: string;
   notes: string;
@@ -754,7 +752,6 @@ type StatusHistory = {
   changedAt: string;
 };
 
-// ✅ InventoryProduct extended (category/cost/description)
 type InventoryProduct = {
   id: string;
   sku: string;
@@ -767,119 +764,22 @@ type InventoryProduct = {
   active: boolean;
   createdAt: string;
   updatedAt: string;
-  category?: string; // ✅ Section 9
-  costPrice?: number; // ✅ Section 9 (fallback = price * 0.6)
+  category?: string;
+  costPrice?: number; // fallback = price * 0.6
 };
 
-// ============================================================
-// ACCOUNTING
-// ============================================================
-type AccountingMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
-// ✅ FIX: 'Partially Paid' added to match RecordsSection
-type AccountingTransaction = {
+// Row shape returned by customerService
+type CustomerRow = {
   id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: 'In' | 'Out' | 'Return';
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned'; // ✅
-  mode: AccountingMode;
-  sourceDocumentId?: string;
-  sourceModule?: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-  createdAt: string;
-};
-
-const TRANSACTIONS_KEY = 'zakhira_transactions';
-
-const loadAccountingList = (): AccountingTransaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveAccountingList = (list: AccountingTransaction[]): boolean => {
-  try {
-    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const genAccountingTxnNo = (existing: AccountingTransaction[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `TXN-${year}-`;
-  const numbers = existing
-    .filter((x) => x.transactionNo.startsWith(prefix))
-    .map((x) => Number(x.transactionNo.split('-')[2]))
-    .filter((n) => !Number.isNaN(n));
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-};
-
-const mapPaymentMode = (m: PaymentMethod | ''): AccountingMode => {
-  if (m === 'Cash') return 'Cash';
-  if (m === 'Card') return 'Card';
-  if (m === 'Bank Transfer') return 'Bank Transfer';
-  return 'Other';
-};
-
-const syncAccountingEntry = (data: {
-  type: 'In' | 'Out' | 'Return';
-  amount: number;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: AccountingMode;
-  sourceDocumentId: string;
-  sourceModule: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-}): AccountingTransaction | null => {
-  const existing = loadAccountingList();
-  const idx = existing.findIndex((x) => x.sourceDocumentId === data.sourceDocumentId);
-  if (idx >= 0) {
-    const updated: AccountingTransaction = {
-      ...existing[idx],
-      amount: data.amount,
-      status: data.status,
-      mode: data.mode,
-      date: data.date,
-      notes: data.notes || existing[idx].notes,
-    };
-    const newList = [...existing];
-    newList[idx] = updated;
-    saveAccountingList(newList);
-    return updated;
-  }
-  const txn: AccountingTransaction = {
-    id: `txn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    transactionNo: genAccountingTxnNo(existing),
-    date: data.date,
-    customerName: data.customerName,
-    companyName: data.companyName,
-    invoiceRef: data.invoiceRef,
-    type: data.type,
-    amount: data.amount,
-    status: data.status,
-    mode: data.mode,
-    sourceDocumentId: data.sourceDocumentId,
-    sourceModule: data.sourceModule,
-    notes: data.notes,
-    createdAt: new Date().toISOString(),
-  };
-  saveAccountingList([txn, ...existing]);
-  return txn;
+  name: string;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  phone_alt?: string | null;
+  address?: string | null;
+  city?: string | null;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 // ============================================================
@@ -1011,11 +911,10 @@ const Icons = {
 // ============================================================
 // CONSTANTS + HELPERS
 // ============================================================
-const CUSTOMERS_KEY = 'zakhira_sales_customers';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
 const HISTORY_KEY = 'zakhira_sales_status_history';
-const INVENTORY_PRODUCTS_KEY = 'zakhira_inventory_products';
 const DRAFT_KEY = 'zakhira_invoice_draft';
+// Same key the Products page uses (backend has no images column yet)
+const IMAGES_KEY = 'zakhira_product_images';
 const DEFAULT_VAT_RATE = 15;
 const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Bank Transfer', 'Card', 'Other'];
 const CUSTOMER_ROW_H = 44;
@@ -1071,7 +970,7 @@ const phoneKeysOf = (c: { phone: string; phoneAlt?: string }): string[] =>
 
 const generateOrderNumber = (
   type: DocumentType,
-  existing: DocumentRecord[]
+  existing: { orderNumber: string }[]
 ): string => {
   const year = new Date().getFullYear();
   const prefix = type === 'quotation' ? `QT-${year}-` : `INV-${year}-`;
@@ -1095,7 +994,6 @@ const getCurrentUser = (): { id: string; name: string } => {
   }
 };
 
-// ✅ NEW: tenant id auto-fetch
 const getTenantId = (): string => {
   try {
     const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
@@ -1152,54 +1050,100 @@ const EMPTY_CUSTOMER = {
   address: '',
 };
 
+const errMsg = (e: unknown, fallback: string): string =>
+  (e as { message?: string })?.message || fallback;
+
 // ============================================================
-// STORAGE
+// DB → UI MAPPING
 // ============================================================
-const loadCustomers = (): Customer[] => {
+const getProductImages = (id: string): string[] => {
   try {
-    const raw = localStorage.getItem(CUSTOMERS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((c: Customer) => ({
-      ...c,
-      phone: c.phone || '',
-      phoneAlt: c.phoneAlt || '',
-    }));
+    const map = JSON.parse(localStorage.getItem(IMAGES_KEY) || '{}');
+    return Array.isArray(map[id]) ? map[id] : [];
   } catch {
     return [];
   }
 };
 
-const saveCustomers = (list: Customer[]): boolean => {
-  try {
-    localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
+const toUiCustomer = (r: CustomerRow): Customer => ({
+  id: r.id,
+  name: r.name,
+  company: r.company || '',
+  phone: r.phone || '',
+  phoneAlt: r.phone_alt || '',
+  email: r.email || '',
+  address: r.address || '',
+  city: r.city || '',
+  createdAt: r.created_at,
+  updatedAt: r.updated_at || r.created_at,
+});
 
-const loadDocuments = (): DocumentRecord[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
+const toInventoryProduct = (
+  p: DbProduct,
+  cats: DbCategory[]
+): InventoryProduct => ({
+  id: p.id,
+  sku: p.sku,
+  name: p.name,
+  description: p.description || '',
+  price: Number(p.price),
+  stock: Number(p.stock),
+  lowStockLevel: Number(p.low_stock_level),
+  images: getProductImages(p.id),
+  active: p.active,
+  createdAt: p.created_at,
+  updatedAt: p.updated_at,
+  category: cats.find((c) => c.id === p.category_id)?.name || '',
+  costPrice: Number(p.cost_price) || undefined,
+});
 
-const saveDocuments = (list: DocumentRecord[]): boolean => {
-  try {
-    localStorage.setItem(DOCUMENTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
+// DocumentRecord → salesService input
+const toServiceInput = (
+  r: DocumentRecord,
+  customerId: string | null
+): SalesDocumentInput => ({
+  documentType: r.documentType,
+  orderNumber: r.orderNumber,
+  customerId,
+  customerName: r.customerSnapshot.name,
+  customerCompany: r.customerSnapshot.company,
+  customerPhone: r.customerSnapshot.phone,
+  customerPhoneAlt: r.customerSnapshot.phoneAlt,
+  customerEmail: r.customerSnapshot.email,
+  customerAddress: r.customerSnapshot.address,
+  customerCity: r.customerSnapshot.city,
+  issueDate: r.issueDate,
+  dueDate: r.dueDate,
+  status: r.status,
+  currency: r.currency,
+  notes: r.notes,
+  vatNumber: r.vatNumber,
+  vatRate: r.vatRate,
+  subtotal: r.subtotal,
+  discountTotal: r.discountTotal,
+  taxTotal: r.taxTotal,
+  grandTotal: r.grandTotal,
+  paymentStatus: r.paymentStatus,
+  paymentMethod: r.paymentMethod || null,
+  paymentAmount: r.paymentAmount,
+  balanceDue: r.balanceDue,
+  lines: r.lines.map((l) => ({
+    productId: l.productId,
+    material: l.material,
+    sku: l.sku,
+    category: l.category,
+    costPrice: l.costPrice ?? 0,
+    description: l.description,
+    quantity: l.quantity,
+    unitPrice: l.unitPrice,
+    discountValue: l.discountValue,
+    lineTotal: l.lineTotal,
+  })),
+});
 
+// ============================================================
+// STATUS HISTORY (local only)
+// ============================================================
 const loadHistory = (): StatusHistory[] => {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
@@ -1217,18 +1161,6 @@ const saveHistory = (list: StatusHistory[]): boolean => {
     return true;
   } catch {
     return false;
-  }
-};
-
-const loadInventoryProducts = (): InventoryProduct[] => {
-  try {
-    const raw = localStorage.getItem(INVENTORY_PRODUCTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((p: InventoryProduct) => p.active);
-  } catch {
-    return [];
   }
 };
 
@@ -1905,23 +1837,26 @@ function CustomerPicker({
 
 // ============================================================
 // QUICK ADD CUSTOMER MODAL
-// Same logic as the Customers page: 2 phone inputs (with / without
-// country code), at least one required, phone is unique + primary key.
+// 2 phone inputs (with / without country code), at least one required,
+// phone must be unique. Saved to the backend via customerService.
 // ============================================================
 type QuickErrors = Partial<Record<keyof typeof EMPTY_CUSTOMER | 'phoneGroup', string>>;
 
 function QuickCustomerModal({
   tr,
+  customers,
   onClose,
   onSaved,
 }: {
   tr: Translations;
+  customers: Customer[];
   onClose: () => void;
-  onSaved: (c: Customer, list: Customer[]) => void;
+  onSaved: (c: Customer) => void;
 }): React.JSX.Element {
   const [form, setForm] = useState({ ...EMPTY_CUSTOMER });
   const [errors, setErrors] = useState<QuickErrors>({});
   const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -1934,7 +1869,8 @@ function QuickCustomerModal({
   const set = (k: keyof typeof EMPTY_CUSTOMER, v: string): void =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     const e: QuickErrors = {};
     if (!form.name.trim()) e.name = tr.errName;
 
@@ -1953,16 +1889,13 @@ function QuickCustomerModal({
       e.email = tr.errEmailInvalid;
     }
 
-    // Always check against the freshest data in storage
-    const list = loadCustomers();
-
-    // 🔒 UNIQUE PHONE — any number used by another customer is blocked
+    // 🔒 UNIQUE PHONE — checked against the loaded customers list
     if (intl && !e.phone) {
-      const dup = list.find((c) => phoneKeysOf(c).some((k) => samePhone(k, intl)));
+      const dup = customers.find((c) => phoneKeysOf(c).some((k) => samePhone(k, intl)));
       if (dup) e.phone = tr.errDuplicatePhone(dup.name);
     }
     if (alt) {
-      const dup = list.find((c) => phoneKeysOf(c).some((k) => samePhone(k, alt)));
+      const dup = customers.find((c) => phoneKeysOf(c).some((k) => samePhone(k, alt)));
       if (dup) e.phoneAlt = tr.errDuplicatePhone(dup.name);
     }
 
@@ -1970,26 +1903,22 @@ function QuickCustomerModal({
     setSaveError('');
     if (Object.keys(e).length > 0) return;
 
-    const now = new Date().toISOString();
-    const key = intl || alt; // 🔑 primary key
-    const created: Customer = {
-      id: key,
-      name: form.name.trim(),
-      company: form.company.trim(),
-      email: form.email.trim(),
-      phone: intl,
-      phoneAlt: alt,
-      address: form.address.trim(),
-      city: form.city.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    const next = [created, ...list];
-    if (!saveCustomers(next)) {
+    setSaving(true);
+    try {
+      const row = await customerService.createCustomer({
+        name: form.name.trim(),
+        company: form.company.trim() || null,
+        email: form.email.trim() || null,
+        phone: intl || null,
+        phone_alt: alt || null,
+        address: form.address.trim() || null,
+        city: form.city.trim() || null,
+      });
+      onSaved(toUiCustomer(row as CustomerRow));
+    } catch {
       setSaveError(tr.errStorage);
-      return;
+      setSaving(false);
     }
-    onSaved(created, next);
   };
 
   const errCls = 'mt-1 px-2 text-[10px] font-semibold';
@@ -2156,8 +2085,9 @@ function QuickCustomerModal({
           >
             <button
               type="button"
-              onClick={submit}
-              className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full px-4 text-[13px] font-bold transition-all hover:brightness-95"
+              onClick={() => void submit()}
+              disabled={saving}
+              className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full px-4 text-[13px] font-bold transition-all hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
               style={{
                 background: THEME.warmBrass,
                 color: THEME.warmIvory,
@@ -2517,9 +2447,10 @@ export default function InvoicePage(): React.JSX.Element {
   const isRTL = language === 'ar' || language === 'ur';
   const tr: Translations = t[language];
 
-  const [customers, setCustomers] = useState<Customer[]>(() => loadCustomers());
-  const [documents, setDocuments] = useState<DocumentRecord[]>(() => loadDocuments());
-  const [inventoryProducts] = useState<InventoryProduct[]>(() => loadInventoryProducts());
+  // ✅ Data now comes from the backend
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [documents, setDocuments] = useState<{ orderNumber: string }[]>([]);
+  const [inventoryProducts, setInventoryProducts] = useState<InventoryProduct[]>([]);
 
   const [customerId, setCustomerId] = useState('');
   const [customer, setCustomer] = useState({ ...EMPTY_CUSTOMER });
@@ -2566,6 +2497,36 @@ export default function InvoicePage(): React.JSX.Element {
     setSuccessMsg('');
     setTimeout(() => setErrorMsg(''), 3500);
   };
+
+  // ============================================================
+  // LOAD FROM BACKEND
+  // ============================================================
+  const loadData = async (): Promise<void> => {
+    try {
+      const [custRows, docRows, prodRows, cats] = await Promise.all([
+        customerService.getCustomers(),
+        salesService.getDocuments(),
+        productService.getProducts(),
+        productService.getCategories(),
+      ]);
+      setCustomers(((custRows || []) as CustomerRow[]).map(toUiCustomer));
+      setDocuments(
+        (docRows as { order_number: string }[]).map((d) => ({
+          orderNumber: d.order_number,
+        }))
+      );
+      setInventoryProducts(
+        prodRows.filter((p) => p.active).map((p) => toInventoryProduct(p, cats))
+      );
+    } catch (e) {
+      showError(errMsg(e, tr.errStorage));
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ============================================================
   // DERIVED
@@ -2666,7 +2627,6 @@ export default function InvoicePage(): React.JSX.Element {
     setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   };
 
-  // ✅ UPDATED: also copy category, costPrice, description from product
   const handleSelectProduct = (lineId: string, product: InventoryProduct): void => {
     const derivedCost =
       typeof product.costPrice === 'number' && product.costPrice > 0
@@ -2684,9 +2644,9 @@ export default function InvoicePage(): React.JSX.Element {
               sku: product.sku,
               unitPrice: product.price,
               quantity: l.quantity > 0 ? l.quantity : 1,
-              category: product.category || '', // ✅
-              costPrice: derivedCost, // ✅
-              description: product.description || '', // ✅
+              category: product.category || '',
+              costPrice: derivedCost,
+              description: product.description || '',
             }
           : l
       )
@@ -2742,10 +2702,9 @@ export default function InvoicePage(): React.JSX.Element {
     return null;
   };
 
-  // ✅ UPDATED: also fill dueDate, salesChannel, tenantId, updatedAt, line category/costPrice/description
   const buildRecord = (
     type: DocumentType,
-    docs: DocumentRecord[],
+    docs: { orderNumber: string }[],
     resolvedCustomerId?: string
   ): DocumentRecord => {
     const user = getCurrentUser();
@@ -2787,9 +2746,8 @@ export default function InvoicePage(): React.JSX.Element {
       customerId: resolvedCustomerId ?? (customerId || 'manual'),
       customerSnapshot: snapshot,
       issueDate,
-      // ✅ Section 9 auto-fills
       dueDate: issueDate,
-      salesChannel: 'Offline',
+      salesChannel: 'Online',
       tenantId: getTenantId(),
       updatedAt: nowIso,
       status: hasPayment ? 'Approved' : 'Pending',
@@ -2805,7 +2763,6 @@ export default function InvoicePage(): React.JSX.Element {
           productImage: l.productImage,
           material: l.material.trim(),
           sku: l.sku,
-          // ✅ Section 9
           category: l.category || '',
           costPrice: typeof l.costPrice === 'number' ? l.costPrice : 0,
           description: l.description || '',
@@ -2834,43 +2791,40 @@ export default function InvoicePage(): React.JSX.Element {
 
   /**
    * Links the typed customer to an existing one (same phone, any format)
-   * or creates a new customer whose id = phone (primary key).
-   * Returns the customerId to store on the document.
+   * or creates a new customer in the backend.
+   * Returns the customer id (uuid) or null if there is none.
    */
-  const saveCustomerIfNew = (): string => {
+  const saveCustomerIfNew = async (): Promise<string | null> => {
     if (customerId) return customerId;
-    if (!customer.name.trim()) return 'manual';
+    if (!customer.name.trim()) return null;
 
     const intl = normalizePhone(customer.phone);
     const alt = normalizePhone(customer.phoneAlt);
     const mine = [intl, alt].filter(Boolean);
-    const key = intl || alt;
-    if (!key) return 'manual';
+    if (mine.length === 0) return null;
 
-    const list = loadCustomers();
-    const existing = list.find((c) =>
+    // 🔒 never create a duplicate phone — link to the existing customer
+    const existing = customers.find((c) =>
       phoneKeysOf(c).some((k) => mine.some((m) => samePhone(k, m)))
     );
-    if (existing) return existing.id; // 🔒 never create a duplicate phone
+    if (existing) return existing.id;
 
-    const now = new Date().toISOString();
-    const created: Customer = {
-      id: key,
-      name: customer.name.trim(),
-      company: customer.company.trim(),
-      phone: intl,
-      phoneAlt: alt,
-      email: customer.email.trim(),
-      address: customer.address.trim(),
-      city: customer.city.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    if (saveCustomers([created, ...list])) {
-      setCustomers([created, ...list]);
-      return key;
+    try {
+      const row = await customerService.createCustomer({
+        name: customer.name.trim(),
+        company: customer.company.trim() || null,
+        email: customer.email.trim() || null,
+        phone: intl || null,
+        phone_alt: alt || null,
+        address: customer.address.trim() || null,
+        city: customer.city.trim() || null,
+      });
+      const created = toUiCustomer(row as CustomerRow);
+      setCustomers((prev) => [created, ...prev]);
+      return created.id;
+    } catch {
+      return null; // even if the customer fails to save, the document still saves
     }
-    return 'manual';
   };
 
   const resetForm = (): void => {
@@ -2986,30 +2940,10 @@ export default function InvoicePage(): React.JSX.Element {
     window.dispatchEvent(new Event('zakhira:sales-updated'));
   };
 
+  // Accounting + stock are now handled inside salesService.createDocument,
+  // so here we only keep the local status history and notify other sections.
   const finalizeRecord = (record: DocumentRecord): void => {
     if (record.paymentAmount > 0) {
-      syncAccountingEntry({
-        type: 'In',
-        amount: record.paymentAmount,
-        date: record.issueDate,
-        customerName: record.customerSnapshot.name,
-        companyName: record.customerSnapshot.company,
-        invoiceRef: record.orderNumber,
-        // ✅ FIX: pass 'Partially Paid' when only partial
-        status:
-          record.paymentStatus === 'Paid'
-            ? 'Paid'
-            : record.paymentStatus === 'Partially Paid'
-              ? 'Partially Paid'
-              : 'Pending',
-        mode: mapPaymentMode(record.paymentMethod),
-        sourceDocumentId: record.id,
-        sourceModule: 'sales',
-        notes: `Auto entry from Sales ${
-          record.documentType === 'invoice' ? 'Invoice' : 'Quotation'
-        } ${record.orderNumber} (Received: ${formatMoney(record.paymentAmount)})`,
-      });
-
       saveHistory([
         ...loadHistory(),
         {
@@ -3024,30 +2958,35 @@ export default function InvoicePage(): React.JSX.Element {
       ]);
     }
     notifyRecordsSection();
+    window.dispatchEvent(new Event('zakhira:inventory-updated'));
   };
 
-  const handleCreateInvoice = (): void => {
+  const handleCreateInvoice = async (): Promise<void> => {
+    if (sending) return;
     const err = validate();
     if (err) {
       showError(err);
       return;
     }
 
-    const resolvedId = saveCustomerIfNew();
+    setSending(true);
+    try {
+      const resolvedId = await saveCustomerIfNew();
+      const record = buildRecord('invoice', documents, resolvedId ?? undefined);
+      const saved = await salesService.createDocument(
+        toServiceInput(record, resolvedId)
+      );
 
-    const docs = loadDocuments();
-    const record = buildRecord('invoice', docs, resolvedId);
-    if (!saveDocuments([record, ...docs])) {
-      showError(tr.errStorage);
-      return;
+      finalizeRecord({ ...record, id: saved.id });
+      discardDraft();
+      showSuccess(tr.toastInvoice(record.orderNumber));
+      await loadData(); // refresh order numbers + stock
+      setTimeout(resetForm, 1500);
+    } catch (e) {
+      showError(errMsg(e, tr.errStorage));
+    } finally {
+      setSending(false);
     }
-    setDocuments([record, ...docs]);
-
-    finalizeRecord(record);
-    discardDraft();
-
-    showSuccess(tr.toastInvoice(record.orderNumber));
-    setTimeout(resetForm, 1500);
   };
 
   const buildWhatsAppText = (record: DocumentRecord): string => {
@@ -3085,17 +3024,23 @@ export default function InvoicePage(): React.JSX.Element {
 
     setSending(true);
     try {
-      const resolvedId = saveCustomerIfNew();
+      const resolvedId = await saveCustomerIfNew();
+      const draftRecord = buildRecord('quotation', documents, resolvedId ?? undefined);
 
-      const docs = loadDocuments();
-      const record = buildRecord('quotation', docs, resolvedId);
-      if (!saveDocuments([record, ...docs])) {
-        showError(tr.errStorage);
+      let record: DocumentRecord;
+      try {
+        const saved = await salesService.createDocument(
+          toServiceInput(draftRecord, resolvedId)
+        );
+        record = { ...draftRecord, id: saved.id };
+      } catch (e) {
+        showError(errMsg(e, tr.errStorage));
         return;
       }
-      setDocuments([record, ...docs]);
+
       finalizeRecord(record);
       discardDraft();
+      void loadData();
 
       const text = [
         tr.waHello(record.customerSnapshot.name),
@@ -3775,7 +3720,7 @@ export default function InvoicePage(): React.JSX.Element {
                 </button>
                 <button
                   type="button"
-                  onClick={handleCreateInvoice}
+                  onClick={() => void handleCreateInvoice()}
                   disabled={sending}
                   className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[12px] font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ background: THEME.warmBrass }}
@@ -3987,9 +3932,10 @@ export default function InvoicePage(): React.JSX.Element {
       {showCustomerModal && (
         <QuickCustomerModal
           tr={tr}
+          customers={customers}
           onClose={() => setShowCustomerModal(false)}
-          onSaved={(c, list) => {
-            setCustomers(list);
+          onSaved={(c) => {
+            setCustomers((prev) => [c, ...prev]);
             applyCustomer(c);
             setShowCustomerModal(false);
             showSuccess(tr.toastCustomerAdded(c.name));

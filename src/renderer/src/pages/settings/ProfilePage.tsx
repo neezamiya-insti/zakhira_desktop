@@ -1,6 +1,8 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import { profileService } from '@renderer/services/profileService';
 
 // ============================================================
 // TYPES
@@ -22,9 +24,27 @@ export type UserCredentials = {
   fullName: string;
   email: string;
   phone: string;
-  currentPassword: string;
   newPassword: string;
   confirmPassword: string;
+};
+
+/** Row exactly as it comes from the Supabase `businesses` table */
+type DbBusiness = {
+  name: string | null;
+  name_ur: string | null;
+  name_ar: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  logo: string | null;
+};
+
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
 };
 
 // ============================================================
@@ -71,6 +91,16 @@ const t = {
     errLogoType: 'Choose PNG, JPG, or WebP image.',
     errLogoSize: 'Logo must be smaller than 1 MB.',
     errReadFail: 'Could not read the file.',
+    errBusinessName: 'Business name is required',
+    errorTitle: 'Something went wrong',
+    errLoadBusiness: 'Could not load business profile',
+    errLoadAccount: 'Could not load account details',
+    errSaveProfile: 'Could not save business profile',
+    errSaveAccount: 'Could not save account changes',
+    emailPendingNote:
+      'Email change requested — check your inbox and confirm the new address.',
+    loading: 'Loading…',
+    ok: 'OK',
   },
   ar: {
     profileTitle: 'الملف الشخصي',
@@ -112,6 +142,16 @@ const t = {
     errLogoType: 'اختر صورة PNG أو JPG أو WebP.',
     errLogoSize: 'يجب أن يكون الشعار أصغر من 1 ميجا.',
     errReadFail: 'تعذر قراءة الملف.',
+    errBusinessName: 'اسم العمل مطلوب',
+    errorTitle: 'حدث خطأ ما',
+    errLoadBusiness: 'تعذر تحميل ملف العمل',
+    errLoadAccount: 'تعذر تحميل بيانات الحساب',
+    errSaveProfile: 'تعذر حفظ ملف العمل',
+    errSaveAccount: 'تعذر حفظ تغييرات الحساب',
+    emailPendingNote:
+      'تم طلب تغيير البريد — تحقق من صندوق الوارد وأكد العنوان الجديد.',
+    loading: 'جارٍ التحميل…',
+    ok: 'موافق',
   },
   ur: {
     profileTitle: 'پروفائل',
@@ -153,6 +193,16 @@ const t = {
     errLogoType: 'PNG, JPG یا WebP تصویر منتخب کریں۔',
     errLogoSize: 'لوگو 1 MB سے چھوٹا ہونا چاہیے۔',
     errReadFail: 'فائل پڑھی نہیں جا سکی۔',
+    errBusinessName: 'کاروباری نام لازمی ہے',
+    errorTitle: 'کچھ غلط ہو گیا',
+    errLoadBusiness: 'کاروباری پروفائل لوڈ نہیں ہو سکا',
+    errLoadAccount: 'اکاؤنٹ کی تفصیلات لوڈ نہیں ہو سکیں',
+    errSaveProfile: 'کاروباری پروفائل محفوظ نہیں ہو سکا',
+    errSaveAccount: 'اکاؤنٹ کی تبدیلیاں محفوظ نہیں ہو سکیں',
+    emailPendingNote:
+      'ای میل تبدیلی کی درخواست بھیج دی گئی — ان باکس چیک کر کے نیا پتہ تصدیق کریں۔',
+    loading: 'لوڈ ہو رہا ہے…',
+    ok: 'ٹھیک ہے',
   },
   hi: {
     profileTitle: 'प्रोफ़ाइल',
@@ -194,39 +244,117 @@ const t = {
     errLogoType: 'PNG, JPG, या WebP छवि चुनें।',
     errLogoSize: 'लोगो 1 MB से छोटा होना चाहिए।',
     errReadFail: 'फ़ाइल पढ़ी नहीं जा सकी।',
+    errBusinessName: 'व्यवसाय का नाम आवश्यक है',
+    errorTitle: 'कुछ गलत हो गया',
+    errLoadBusiness: 'व्यवसाय प्रोफ़ाइल लोड नहीं हो सकी',
+    errLoadAccount: 'खाते का विवरण लोड नहीं हो सका',
+    errSaveProfile: 'व्यवसाय प्रोफ़ाइल सहेजी नहीं जा सकी',
+    errSaveAccount: 'खाते के परिवर्तन सहेजे नहीं जा सके',
+    emailPendingNote:
+      'ईमेल बदलने का अनुरोध भेजा गया — इनबॉक्स देखें और नया पता सत्यापित करें।',
+    loading: 'लोड हो रहा है…',
+    ok: 'ठीक है',
   },
 } as const;
 
-// ✅ FIX: Type is now flexible enough to accept ANY of the 4 languages,
-// not just the English literal strings.
 type Translations = {
   [K in keyof typeof t['en']]: string;
 };
 
 // ============================================================
-// STORAGE
+// STORAGE (local cache only — real data lives in Supabase)
 // ============================================================
+// Other pages (invoices, print, etc.) may still read this cache.
 const PROFILE_KEY = 'zakhira_settings';
-const CREDENTIALS_KEY = 'zakhira_credentials';
 
-const DEFAULT_PROFILE: BusinessProfile = {
-  businessName: 'Zakhira Furniture Co.',
-  businessNameUr: 'زخیرہ فرنیچر کمپنی',
-  businessNameAr: 'شركة زخيرة للأثاث',
-  phone: '+966 50 123 4567',
-  email: 'info@zakhira.sa',
-  address: 'King Fahd Road, Building 12',
-  city: 'Riyadh',
+const EMPTY_PROFILE: BusinessProfile = {
+  businessName: '',
+  businessNameUr: '',
+  businessNameAr: '',
+  phone: '',
+  email: '',
+  address: '',
+  city: '',
   logo: '',
 };
 
-const DEFAULT_CREDENTIALS: UserCredentials = {
-  fullName: '',
-  email: '',
-  phone: '',
-  currentPassword: '',
-  newPassword: '',
-  confirmPassword: '',
+const readCachedProfile = (): BusinessProfile => {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return EMPTY_PROFILE;
+    return { ...EMPTY_PROFILE, ...JSON.parse(raw) };
+  } catch {
+    return EMPTY_PROFILE;
+  }
+};
+
+const cacheProfile = (p: BusinessProfile): void => {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  } catch {
+    /* ignore — cache only */
+  }
+};
+
+type StoredUser = { id?: string; name?: string; email?: string; language?: Lang };
+
+const readStoredUser = (): StoredUser => {
+  try {
+    return JSON.parse(localStorage.getItem('zakhira_user') || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const patchStoredUser = (patch: Record<string, string>): void => {
+  try {
+    localStorage.setItem(
+      'zakhira_user',
+      JSON.stringify({ ...readStoredUser(), ...patch })
+    );
+  } catch {
+    /* ignore */
+  }
+};
+
+// ============================================================
+// BACKEND HELPERS
+// ============================================================
+const mapBusiness = (r: DbBusiness): BusinessProfile => ({
+  businessName: r.name ?? '',
+  businessNameUr: r.name_ur ?? '',
+  businessNameAr: r.name_ar ?? '',
+  phone: r.phone ?? '',
+  email: r.email ?? '',
+  address: r.address ?? '',
+  city: r.city ?? '',
+  logo: r.logo ?? '',
+});
+
+/** Supabase throws plain objects (message/details/hint/code); Auth throws Error subclasses */
+const describeError = (err: unknown): Omit<ErrorInfo, 'title'> => {
+  if (err && typeof err === 'object') {
+    const e = err as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+      status?: number;
+    };
+    const details = [
+      e.details,
+      e.hint ? `Hint: ${e.hint}` : '',
+      e.status ? `Status: ${e.status}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return {
+      message: e.message || JSON.stringify(err),
+      details: details || undefined,
+      code: e.code,
+    };
+  }
+  return { message: String(err) };
 };
 
 // ============================================================
@@ -234,19 +362,15 @@ const DEFAULT_CREDENTIALS: UserCredentials = {
 // ============================================================
 const ICON_PATHS = {
   building: 'M3 21h18M4 10h16M5 10V21M19 10V21M8 10v11M16 10v11M12 3 2 10h20L12 3z',
-  clipboard: 'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z',
   image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM10 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zM21 15l-5-5L5 21',
   upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8',
   check: 'M20 6 9 17l-5-5',
   alert: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
-  lock: 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM7 11V7a5 5 0 0 1 10 0v4',
-  user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M16 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z',
-  mail: 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 7l-10 6L2 7',
-  phone: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z',
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   eyeOff: 'M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22',
+  x: 'M18 6 6 18M6 6l12 12',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -275,71 +399,258 @@ const Icon = ({
 );
 
 // ============================================================
-// STYLES (real theme — literal hex values) [COMPACT]
+// STYLES (all colors come from THEME)
 // ============================================================
-const labelCls =
-  'block text-[9px] font-bold text-[#252A28] mb-1 uppercase tracking-wider';
-const inputCls =
-  'w-full h-9 px-3 rounded-full border-2 border-[#66745A]/20 bg-[#F7F3EA]/60 text-[#252A28] text-[13px] placeholder:text-[#66745A]/40 focus:outline-none focus:border-[#C49A5A] focus:bg-white transition-all';
-const primaryBtn =
-  'h-9 px-4 rounded-full bg-[#C49A5A] text-white text-[13px] font-bold cursor-pointer transition-all duration-300 hover:brightness-95 hover:shadow-md flex items-center justify-center gap-1.5 disabled:opacity-40';
-const ghostBtn =
-  'h-9 px-4 rounded-full bg-[#F7F3EA] text-[#66745A] text-[13px] font-bold cursor-pointer border-2 border-[#66745A]/20 hover:bg-white hover:text-[#252A28] transition-all flex items-center justify-center gap-1.5';
+const labelCls = 'block text-[9px] font-bold mb-1 uppercase tracking-wider';
+const btnCls =
+  'h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all duration-300 hover:brightness-95 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
+const primaryStyle: React.CSSProperties = {
+  background: THEME.warmBrass,
+  color: '#FFFFFF',
+};
+const ghostStyle: React.CSSProperties = {
+  background: THEME.warmIvory,
+  color: THEME.mutedOlive,
+  border: `2px solid ${THEME.mutedOlive}33`,
+};
+const cardStyle: React.CSSProperties = {
+  background: '#FFFFFF',
+  border: `1px solid ${THEME.mutedOlive}1A`,
+};
+const errTextCls = 'text-[10px] font-semibold mt-1 px-1.5';
+const ERR_COLOR = '#dc2626';
+
+function TextInput({
+  value,
+  onChange,
+  type = 'text',
+  dir,
+  placeholder,
+  mono = false,
+  error = false,
+  padEnd = false,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  dir?: 'ltr' | 'rtl';
+  placeholder?: string;
+  mono?: boolean;
+  error?: boolean;
+  padEnd?: boolean;
+  disabled?: boolean;
+}): React.JSX.Element {
+  const [focus, setFocus] = useState(false);
+  return (
+    <input
+      type={type}
+      dir={dir}
+      value={value}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
+      className={`w-full h-9 px-3 rounded-full border-2 text-[13px] focus:outline-none transition-all ${
+        mono ? 'font-mono' : ''
+      }`}
+      style={{
+        background: error
+          ? '#fef2f2'
+          : focus
+          ? '#FFFFFF'
+          : `${THEME.warmIvory}99`,
+        borderColor: error
+          ? '#fca5a5'
+          : focus
+          ? THEME.warmBrass
+          : `${THEME.mutedOlive}33`,
+        color: THEME.charcoal,
+        paddingInlineEnd: padEnd ? 40 : undefined,
+      }}
+    />
+  );
+}
+
+// ============================================================
+// ERROR MODAL (backend errors popup)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: `${THEME.charcoal}80`, backdropFilter: 'blur(4px)' }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="rounded-2xl w-full max-w-md max-h-[92vh] flex flex-col shadow-xl"
+        style={{ background: THEME.warmIvory }}
+      >
+        <div
+          className="flex items-start justify-between gap-3 px-5 pt-5 pb-3"
+          style={{ borderBottom: `1px solid ${THEME.mutedOlive}20` }}
+        >
+          <h2 className="text-sm font-bold" style={{ color: THEME.deepForest }}>
+            {info.title}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-7 h-7 flex-shrink-0 rounded-full flex items-center justify-center cursor-pointer"
+            style={{
+              background: `${THEME.mutedOlive}15`,
+              color: THEME.mutedOlive,
+            }}
+          >
+            <Icon name="x" className="w-3 h-3" strokeWidth={2.5} />
+          </button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto">
+          <div className="flex items-start gap-2 mb-3">
+            <span className="mt-0.5" style={{ color: ERR_COLOR }}>
+              <Icon name="alert" className="w-3.5 h-3.5" />
+            </span>
+            <p
+              className="text-[13px] font-semibold break-words"
+              style={{ color: THEME.charcoal }}
+            >
+              {info.message}
+            </p>
+          </div>
+          {(info.details || info.code) && (
+            <div
+              dir="ltr"
+              className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+              style={{
+                background: '#FFFFFF',
+                border: `1px solid ${THEME.mutedOlive}30`,
+                color: THEME.mutedOlive,
+              }}
+            >
+              {info.code ? `Code: ${info.code}\n` : ''}
+              {info.details}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className={`${btnCls} w-full`}
+            style={primaryStyle}
+          >
+            {okLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // MAIN
 // ============================================================
-export default function ProfilePage(): React.JSX.Element {
-  const user = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
-  const language: Lang = user.language || 'en';
-  const isRTL = language === 'ar' || language === 'ur';
+type AccountBaseline = { fullName: string; email: string; phone: string };
 
+export default function ProfilePage(): React.JSX.Element {
+  const user = readStoredUser();
+  const language: Lang = (['en', 'ar', 'ur', 'hi'] as Lang[]).includes(
+    user.language as Lang
+  )
+    ? (user.language as Lang)
+    : 'en';
+  const isRTL = language === 'ar' || language === 'ur';
   const tr: Translations = t[language];
 
-  const [profile, setProfile] = useState<BusinessProfile>(() => {
-    try {
-      const raw = localStorage.getItem(PROFILE_KEY);
-      if (!raw) return DEFAULT_PROFILE;
-      const parsed = JSON.parse(raw);
-      return { ...DEFAULT_PROFILE, ...parsed };
-    } catch {
-      return DEFAULT_PROFILE;
-    }
+  const [profile, setProfile] = useState<BusinessProfile>(readCachedProfile);
+
+  const [baseline, setBaseline] = useState<AccountBaseline>({
+    fullName: user.name || '',
+    email: user.email || '',
+    phone: '',
+  });
+  const [credentials, setCredentials] = useState<UserCredentials>({
+    fullName: user.name || '',
+    email: user.email || '',
+    phone: '',
+    newPassword: '',
+    confirmPassword: '',
   });
 
-  const [credentials, setCredentials] = useState<UserCredentials>(() => {
-    try {
-      const raw = localStorage.getItem(CREDENTIALS_KEY);
-      if (!raw)
-        return {
-          ...DEFAULT_CREDENTIALS,
-          fullName: user.name || '',
-          email: user.email || '',
-        };
-      const parsed = JSON.parse(raw);
-      return { ...DEFAULT_CREDENTIALS, ...parsed };
-    } catch {
-      return DEFAULT_CREDENTIALS;
-    }
-  });
+  const [loading, setLoading] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
+  const [notice, setNotice] = useState('');
 
   const [logoError, setLogoError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
   const [credErrors, setCredErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState<{
-    current: boolean;
     new: boolean;
     confirm: boolean;
-  }>({ current: false, new: false, confirm: false });
+  }>({ new: false, confirm: false });
 
-  // Auto-save profile
+  /** Logs to console AND shows the popup */
+  const reportError = (title: string, err: unknown): void => {
+    console.error(`[Profile] ${title}`, err);
+    setErrorInfo({ title, ...describeError(err) });
+  };
+
+  // Load business + account from Supabase
   useEffect(() => {
-    try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-    } catch {
-      /* ignore */
-    }
-  }, [profile]);
+    let alive = true;
+    const load = async (): Promise<void> => {
+      const [bizR, accR] = await Promise.allSettled([
+        profileService.getBusinessProfile(),
+        profileService.getAccount(),
+      ]);
+      if (!alive) return;
+
+      if (bizR.status === 'fulfilled') {
+        const mapped = mapBusiness(bizR.value as DbBusiness);
+        setProfile(mapped);
+        cacheProfile(mapped);
+      } else {
+        reportError(tr.errLoadBusiness, bizR.reason);
+      }
+
+      if (accR.status === 'fulfilled') {
+        const acc: AccountBaseline = {
+          fullName: accR.value.fullName || user.name || '',
+          email: accR.value.email || user.email || '',
+          phone: accR.value.phone || '',
+        };
+        setBaseline(acc);
+        setCredentials((c) => ({ ...c, ...acc }));
+      } else {
+        reportError(tr.errLoadAccount, accR.reason);
+      }
+
+      setLoading(false);
+    };
+    void load();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showSaved = (): void => {
     setSaved(true);
@@ -375,11 +686,38 @@ export default function ProfilePage(): React.JSX.Element {
     reader.readAsDataURL(file);
   };
 
-  const handleSaveCredentials = (): void => {
+  // ---------- SAVE BUSINESS PROFILE ----------
+  const handleSaveProfile = async (): Promise<void> => {
+    if (savingProfile) return;
+    if (!profile.businessName.trim()) {
+      setProfileErrors({ businessName: tr.errBusinessName });
+      return;
+    }
+    setProfileErrors({});
+    setSavingProfile(true);
+    try {
+      const row = await profileService.updateBusinessProfile({
+        ...profile,
+        businessName: profile.businessName.trim(),
+      });
+      const mapped = mapBusiness(row as DbBusiness);
+      setProfile(mapped);
+      cacheProfile(mapped);
+      showSaved();
+    } catch (err) {
+      reportError(tr.errSaveProfile, err); // console + popup
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  // ---------- SAVE ACCOUNT (name/phone → email → password) ----------
+  const handleSaveAccount = async (): Promise<void> => {
+    if (savingAccount) return;
     const errs: Record<string, string> = {};
     if (!credentials.fullName.trim()) errs.fullName = tr.errName;
     if (!credentials.email.trim()) errs.email = tr.errEmail;
-    else if (!/^\S+@\S+\.\S+$/.test(credentials.email))
+    else if (!/^\S+@\S+\.\S+$/.test(credentials.email.trim()))
       errs.email = tr.errEmailInvalid;
     if (credentials.newPassword) {
       if (credentials.newPassword.length < 6)
@@ -391,53 +729,72 @@ export default function ProfilePage(): React.JSX.Element {
     setCredErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    try {
-      const savedCreds = JSON.parse(
-        localStorage.getItem(CREDENTIALS_KEY) || '{}'
-      );
-      const merged: UserCredentials = {
-        ...DEFAULT_CREDENTIALS,
-        ...savedCreds,
-        fullName: credentials.fullName,
-        email: credentials.email,
-        phone: credentials.phone,
-      };
-      if (credentials.newPassword) {
-        merged.currentPassword = credentials.newPassword;
-      }
-      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(merged));
-    } catch {
-      /* ignore */
-    }
+    const fullName = credentials.fullName.trim();
+    const phone = credentials.phone.trim();
+    const newEmail = credentials.email.trim();
 
-    setCredentials((c) => ({
-      ...c,
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    }));
-    showSaved();
+    setSavingAccount(true);
+    setNotice('');
+    try {
+      // 1) name + phone (profiles table)
+      await profileService.updateProfile({ fullName, phone });
+      patchStoredUser({ name: fullName });
+      setBaseline((b) => ({ ...b, fullName, phone }));
+
+      // 2) email (Supabase Auth) — only if it changed
+      let emailPending = false;
+      if (newEmail.toLowerCase() !== baseline.email.toLowerCase()) {
+        const res = await profileService.updateEmail(newEmail);
+        if (res.user?.email?.toLowerCase() === newEmail.toLowerCase()) {
+          patchStoredUser({ email: newEmail });
+        } else {
+          emailPending = true; // Supabase waits for email confirmation
+        }
+        setBaseline((b) => ({ ...b, email: newEmail }));
+      }
+
+      // 3) password (Supabase Auth) — only if filled
+      if (credentials.newPassword) {
+        await profileService.updatePassword(credentials.newPassword);
+      }
+
+      setCredentials((c) => ({ ...c, newPassword: '', confirmPassword: '' }));
+      if (emailPending) setNotice(tr.emailPendingNote);
+      showSaved();
+    } catch (err) {
+      reportError(tr.errSaveAccount, err); // console + popup
+    } finally {
+      setSavingAccount(false);
+    }
   };
 
   return (
     <div
       dir={isRTL ? 'rtl' : 'ltr'}
       lang={language}
-      className="min-h-screen bg-[#F7F3EA] p-4 lg:p-5"
+      className="min-h-screen p-4 lg:p-5"
+      style={{ background: THEME.warmIvory }}
     >
       {/* HEADER */}
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-[#123C32]">
+          <h1 className="text-xl font-bold" style={{ color: THEME.deepForest }}>
             {tr.profileTitle}
           </h1>
-          <p className="text-[#66745A] mt-1 text-[12px]">
-            {tr.profileSubtitle}
+          <p className="mt-1 text-[12px]" style={{ color: THEME.mutedOlive }}>
+            {loading ? tr.loading : tr.profileSubtitle}
           </p>
         </div>
 
         {saved && (
-          <div className="px-3 py-1.5 rounded-full bg-[#dcfce7] border-2 border-[#86efac] text-[#15803d] text-[10px] font-bold flex items-center gap-1.5">
+          <div
+            className="px-3 py-1.5 rounded-full text-[10px] font-bold flex items-center gap-1.5"
+            style={{
+              background: '#dcfce7',
+              border: '2px solid #86efac',
+              color: '#15803d',
+            }}
+          >
             <Icon name="check" className="w-3 h-3" strokeWidth={3} />
             <span>{tr.saved}</span>
           </div>
@@ -448,41 +805,61 @@ export default function ProfilePage(): React.JSX.Element {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* LEFT: LOGO */}
         <div className="lg:col-span-1">
-          <div className="bg-white rounded-2xl border border-[#66745A]/10 p-3.5 sticky top-5">
+          <div
+            className="rounded-2xl p-3.5 sticky top-5"
+            style={cardStyle}
+          >
             <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-8 h-8 rounded-full bg-[#C49A5A] flex items-center justify-center text-white">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: THEME.warmBrass, color: '#FFFFFF' }}
+              >
                 <Icon name="image" className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h2 className="text-[13px] font-bold text-[#123C32]">
+                <h2
+                  className="text-[13px] font-bold"
+                  style={{ color: THEME.deepForest }}
+                >
                   {tr.logoTitle}
                 </h2>
-                <p className="text-[9px] text-[#66745A]">
+                <p className="text-[9px]" style={{ color: THEME.mutedOlive }}>
                   {tr.logoSubtitle}
                 </p>
               </div>
             </div>
 
-            <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-[#66745A]/30 bg-[#F7F3EA]/60 p-3 mb-2.5">
-              {profile.logo.startsWith('data:image/') ? (
+            <div
+              className="flex h-36 w-full items-center justify-center overflow-hidden rounded-xl p-3 mb-2.5"
+              style={{
+                border: `2px dashed ${THEME.mutedOlive}4D`,
+                background: `${THEME.warmIvory}99`,
+              }}
+            >
+              {profile.logo.startsWith('data:image/') ||
+              profile.logo.startsWith('http') ? (
                 <img
                   src={profile.logo}
                   alt="Logo"
                   className="h-full w-full object-contain"
                 />
               ) : (
-                <div className="space-y-1.5 text-center text-[#66745A]">
-                  <div className="flex justify-center text-[#C49A5A]">
+                <div
+                  className="space-y-1.5 text-center"
+                  style={{ color: THEME.mutedOlive }}
+                >
+                  <div
+                    className="flex justify-center"
+                    style={{ color: THEME.warmBrass }}
+                  >
                     <Icon name="image" className="w-6 h-6" strokeWidth={1.5} />
                   </div>
-                  <p className="text-[11px] font-medium">
-                    {tr.noLogo}
-                  </p>
+                  <p className="text-[11px] font-medium">{tr.noLogo}</p>
                 </div>
               )}
             </div>
 
-            <label className={`${primaryBtn} w-full cursor-pointer`}>
+            <label className={`${btnCls} w-full`} style={primaryStyle}>
               <Icon name="upload" className="w-3.5 h-3.5" />
               <span>{tr.uploadLogo}</span>
               <input
@@ -492,11 +869,17 @@ export default function ProfilePage(): React.JSX.Element {
                 className="hidden"
               />
             </label>
-            <p className="mt-1.5 text-[9px] text-[#66745A] text-center">
+            <p
+              className="mt-1.5 text-[9px] text-center"
+              style={{ color: THEME.mutedOlive }}
+            >
               {tr.logoHint}
             </p>
             {logoError && (
-              <p className="mt-1.5 text-[10px] font-semibold text-red-600 flex items-center gap-1">
+              <p
+                className="mt-1.5 text-[10px] font-semibold flex items-center gap-1"
+                style={{ color: ERR_COLOR }}
+              >
                 <Icon name="alert" className="w-3 h-3" />
                 <span>{logoError}</span>
               </p>
@@ -507,16 +890,22 @@ export default function ProfilePage(): React.JSX.Element {
         {/* RIGHT: FORM + CREDENTIALS */}
         <div className="lg:col-span-2 space-y-4">
           {/* BUSINESS INFO */}
-          <div className="bg-white rounded-2xl border border-[#66745A]/10 p-3.5">
+          <div className="rounded-2xl p-3.5" style={cardStyle}>
             <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-8 h-8 rounded-full bg-[#123C32] flex items-center justify-center text-[#F7F3EA]">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: THEME.deepForest, color: THEME.warmIvory }}
+              >
                 <Icon name="building" className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h2 className="text-[13px] font-bold text-[#123C32]">
+                <h2
+                  className="text-[13px] font-bold"
+                  style={{ color: THEME.deepForest }}
+                >
                   {tr.businessInfoTitle}
                 </h2>
-                <p className="text-[9px] text-[#66745A]">
+                <p className="text-[9px]" style={{ color: THEME.mutedOlive }}>
                   {tr.businessInfoSubtitle}
                 </p>
               </div>
@@ -524,111 +913,101 @@ export default function ProfilePage(): React.JSX.Element {
 
             <div className="space-y-3">
               <div>
-                <label className={labelCls}>
+                <label className={labelCls} style={{ color: THEME.charcoal }}>
                   {tr.businessNameEn}{' '}
-                  <span className="text-red-500">*</span>
+                  <span style={{ color: '#ef4444' }}>*</span>
                 </label>
-                <input
-                  type="text"
+                <TextInput
                   value={profile.businessName}
-                  onChange={(e) =>
-                    setProfile({ ...profile, businessName: e.target.value })
-                  }
-                  className={inputCls}
+                  error={!!profileErrors.businessName}
+                  onChange={(v) => setProfile({ ...profile, businessName: v })}
                 />
+                {profileErrors.businessName && (
+                  <p className={errTextCls} style={{ color: ERR_COLOR }}>
+                    {profileErrors.businessName}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
                     {tr.businessNameUr}
                   </label>
-                  <input
-                    type="text"
+                  <TextInput
                     dir="rtl"
                     value={profile.businessNameUr}
-                    onChange={(e) =>
-                      setProfile({ ...profile, businessNameUr: e.target.value })
+                    onChange={(v) =>
+                      setProfile({ ...profile, businessNameUr: v })
                     }
-                    className={inputCls}
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
                     {tr.businessNameAr}
                   </label>
-                  <input
-                    type="text"
+                  <TextInput
                     dir="rtl"
                     value={profile.businessNameAr}
-                    onChange={(e) =>
-                      setProfile({ ...profile, businessNameAr: e.target.value })
+                    onChange={(v) =>
+                      setProfile({ ...profile, businessNameAr: v })
                     }
-                    className={inputCls}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
                     {tr.phone}
                   </label>
-                  <input
+                  <TextInput
                     type="tel"
+                    mono
                     value={profile.phone}
-                    onChange={(e) =>
-                      setProfile({ ...profile, phone: e.target.value })
-                    }
-                    className={`${inputCls} font-mono`}
+                    onChange={(v) => setProfile({ ...profile, phone: v })}
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
                     {tr.email}
                   </label>
-                  <input
+                  <TextInput
                     type="email"
                     value={profile.email}
-                    onChange={(e) =>
-                      setProfile({ ...profile, email: e.target.value })
-                    }
-                    className={inputCls}
+                    onChange={(v) => setProfile({ ...profile, email: v })}
                   />
                 </div>
               </div>
 
               <div>
-                <label className={labelCls}>
+                <label className={labelCls} style={{ color: THEME.charcoal }}>
                   {tr.address}
                 </label>
-                <input
-                  type="text"
+                <TextInput
                   value={profile.address}
-                  onChange={(e) =>
-                    setProfile({ ...profile, address: e.target.value })
-                  }
-                  className={inputCls}
+                  onChange={(v) => setProfile({ ...profile, address: v })}
                 />
               </div>
 
               <div>
-                <label className={labelCls}>
+                <label className={labelCls} style={{ color: THEME.charcoal }}>
                   {tr.city}
                 </label>
-                <input
-                  type="text"
+                <TextInput
                   value={profile.city}
-                  onChange={(e) =>
-                    setProfile({ ...profile, city: e.target.value })
-                  }
-                  className={inputCls}
+                  onChange={(v) => setProfile({ ...profile, city: v })}
                 />
               </div>
             </div>
 
             <div className="mt-3.5 flex justify-end">
-              <button onClick={showSaved} className={primaryBtn}>
+              <button
+                onClick={() => void handleSaveProfile()}
+                disabled={savingProfile || loading}
+                className={btnCls}
+                style={primaryStyle}
+              >
                 <Icon name="save" className="w-3.5 h-3.5" />
                 <span>{tr.saveProfile}</span>
               </button>
@@ -636,16 +1015,22 @@ export default function ProfilePage(): React.JSX.Element {
           </div>
 
           {/* CREDENTIALS */}
-          <div className="bg-white rounded-2xl border border-[#66745A]/10 p-3.5">
+          <div className="rounded-2xl p-3.5" style={cardStyle}>
             <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-8 h-8 rounded-full bg-[#C49A5A] flex items-center justify-center text-white">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: THEME.warmBrass, color: '#FFFFFF' }}
+              >
                 <Icon name="shield" className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h2 className="text-[13px] font-bold text-[#123C32]">
+                <h2
+                  className="text-[13px] font-bold"
+                  style={{ color: THEME.deepForest }}
+                >
                   {tr.accountTitle}
                 </h2>
-                <p className="text-[9px] text-[#66745A]">
+                <p className="text-[9px]" style={{ color: THEME.mutedOlive }}>
                   {tr.accountSubtitle}
                 </p>
               </div>
@@ -654,45 +1039,38 @@ export default function ProfilePage(): React.JSX.Element {
             <div className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>
-                    {tr.fullName}{' '}
-                    <span className="text-red-500">*</span>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
+                    {tr.fullName} <span style={{ color: '#ef4444' }}>*</span>
                   </label>
-                  <input
-                    type="text"
+                  <TextInput
                     value={credentials.fullName}
-                    onChange={(e) =>
-                      setCredentials({ ...credentials, fullName: e.target.value })
-                    }
+                    error={!!credErrors.fullName}
                     placeholder={tr.fullNamePh}
-                    className={`${inputCls} ${
-                      credErrors.fullName ? '!border-red-300 !bg-red-50' : ''
-                    }`}
+                    onChange={(v) =>
+                      setCredentials({ ...credentials, fullName: v })
+                    }
                   />
                   {credErrors.fullName && (
-                    <p className="text-[10px] font-semibold text-red-600 mt-1 px-1.5">
+                    <p className={errTextCls} style={{ color: ERR_COLOR }}>
                       {credErrors.fullName}
                     </p>
                   )}
                 </div>
                 <div>
-                  <label className={labelCls}>
-                    {tr.email}{' '}
-                    <span className="text-red-500">*</span>
+                  <label className={labelCls} style={{ color: THEME.charcoal }}>
+                    {tr.email} <span style={{ color: '#ef4444' }}>*</span>
                   </label>
-                  <input
+                  <TextInput
                     type="email"
                     value={credentials.email}
-                    onChange={(e) =>
-                      setCredentials({ ...credentials, email: e.target.value })
-                    }
+                    error={!!credErrors.email}
                     placeholder={tr.emailPh}
-                    className={`${inputCls} ${
-                      credErrors.email ? '!border-red-300 !bg-red-50' : ''
-                    }`}
+                    onChange={(v) =>
+                      setCredentials({ ...credentials, email: v })
+                    }
                   />
                   {credErrors.email && (
-                    <p className="text-[10px] font-semibold text-red-600 mt-1 px-1.5">
+                    <p className={errTextCls} style={{ color: ERR_COLOR }}>
                       {credErrors.email}
                     </p>
                   )}
@@ -700,53 +1078,55 @@ export default function ProfilePage(): React.JSX.Element {
               </div>
 
               <div>
-                <label className={labelCls}>
+                <label className={labelCls} style={{ color: THEME.charcoal }}>
                   {tr.phone}
                 </label>
-                <input
+                <TextInput
                   type="tel"
+                  mono
                   value={credentials.phone}
-                  onChange={(e) =>
-                    setCredentials({ ...credentials, phone: e.target.value })
-                  }
                   placeholder={tr.phonePh}
-                  className={`${inputCls} font-mono`}
+                  onChange={(v) => setCredentials({ ...credentials, phone: v })}
                 />
               </div>
 
-              <div className="pt-2.5 border-t border-[#66745A]/10">
-                <p className="text-[9px] font-bold text-[#66745A] uppercase tracking-wider mb-2.5">
+              <div
+                className="pt-2.5"
+                style={{ borderTop: `1px solid ${THEME.mutedOlive}1A` }}
+              >
+                <p
+                  className="text-[9px] font-bold uppercase tracking-wider mb-2.5"
+                  style={{ color: THEME.mutedOlive }}
+                >
                   {tr.changePassword}
                 </p>
 
                 <div className="space-y-3">
                   <div>
-                    <label className={labelCls}>
+                    <label
+                      className={labelCls}
+                      style={{ color: THEME.charcoal }}
+                    >
                       {tr.newPassword}
                     </label>
                     <div className="relative">
-                      <input
+                      <TextInput
                         type={showPassword.new ? 'text' : 'password'}
                         value={credentials.newPassword}
-                        onChange={(e) =>
-                          setCredentials({
-                            ...credentials,
-                            newPassword: e.target.value,
-                          })
-                        }
+                        error={!!credErrors.newPassword}
                         placeholder={tr.newPasswordPh}
-                        className={`${inputCls} pr-10 ${
-                          credErrors.newPassword
-                            ? '!border-red-300 !bg-red-50'
-                            : ''
-                        }`}
+                        padEnd
+                        onChange={(v) =>
+                          setCredentials({ ...credentials, newPassword: v })
+                        }
                       />
                       <button
                         type="button"
                         onClick={() =>
                           setShowPassword((p) => ({ ...p, new: !p.new }))
                         }
-                        className="absolute top-1/2 -translate-y-1/2 right-2.5 text-[#66745A] hover:text-[#252A28] cursor-pointer"
+                        className="absolute top-1/2 -translate-y-1/2 end-2.5 cursor-pointer"
+                        style={{ color: THEME.mutedOlive }}
                       >
                         <Icon
                           name={showPassword.new ? 'eyeOff' : 'eye'}
@@ -755,32 +1135,29 @@ export default function ProfilePage(): React.JSX.Element {
                       </button>
                     </div>
                     {credErrors.newPassword && (
-                      <p className="text-[10px] font-semibold text-red-600 mt-1 px-1.5">
+                      <p className={errTextCls} style={{ color: ERR_COLOR }}>
                         {credErrors.newPassword}
                       </p>
                     )}
                   </div>
 
                   <div>
-                    <label className={labelCls}>
+                    <label
+                      className={labelCls}
+                      style={{ color: THEME.charcoal }}
+                    >
                       {tr.confirmPassword}
                     </label>
                     <div className="relative">
-                      <input
+                      <TextInput
                         type={showPassword.confirm ? 'text' : 'password'}
                         value={credentials.confirmPassword}
-                        onChange={(e) =>
-                          setCredentials({
-                            ...credentials,
-                            confirmPassword: e.target.value,
-                          })
-                        }
+                        error={!!credErrors.confirmPassword}
                         placeholder={tr.confirmPasswordPh}
-                        className={`${inputCls} pr-10 ${
-                          credErrors.confirmPassword
-                            ? '!border-red-300 !bg-red-50'
-                            : ''
-                        }`}
+                        padEnd
+                        onChange={(v) =>
+                          setCredentials({ ...credentials, confirmPassword: v })
+                        }
                       />
                       <button
                         type="button"
@@ -790,7 +1167,8 @@ export default function ProfilePage(): React.JSX.Element {
                             confirm: !p.confirm,
                           }))
                         }
-                        className="absolute top-1/2 -translate-y-1/2 right-2.5 text-[#66745A] hover:text-[#252A28] cursor-pointer"
+                        className="absolute top-1/2 -translate-y-1/2 end-2.5 cursor-pointer"
+                        style={{ color: THEME.mutedOlive }}
                       >
                         <Icon
                           name={showPassword.confirm ? 'eyeOff' : 'eye'}
@@ -799,7 +1177,7 @@ export default function ProfilePage(): React.JSX.Element {
                       </button>
                     </div>
                     {credErrors.confirmPassword && (
-                      <p className="text-[10px] font-semibold text-red-600 mt-1 px-1.5">
+                      <p className={errTextCls} style={{ color: ERR_COLOR }}>
                         {credErrors.confirmPassword}
                       </p>
                     )}
@@ -808,20 +1186,38 @@ export default function ProfilePage(): React.JSX.Element {
               </div>
             </div>
 
+            {notice && (
+              <p
+                className="mt-3 text-[11px] font-semibold flex items-center gap-1.5"
+                style={{ color: THEME.deepForest }}
+              >
+                <Icon name="check" className="w-3 h-3" strokeWidth={3} />
+                <span>{notice}</span>
+              </p>
+            )}
+
             <div className="mt-3.5 flex justify-end gap-2.5">
               <button
-                onClick={() =>
+                onClick={() => {
                   setCredentials({
-                    ...DEFAULT_CREDENTIALS,
-                    fullName: user.name || '',
-                    email: user.email || '',
-                  })
-                }
-                className={ghostBtn}
+                    ...baseline,
+                    newPassword: '',
+                    confirmPassword: '',
+                  });
+                  setCredErrors({});
+                  setNotice('');
+                }}
+                className={btnCls}
+                style={ghostStyle}
               >
                 {tr.cancel}
               </button>
-              <button onClick={handleSaveCredentials} className={primaryBtn}>
+              <button
+                onClick={() => void handleSaveAccount()}
+                disabled={savingAccount || loading}
+                className={btnCls}
+                style={primaryStyle}
+              >
                 <Icon name="save" className="w-3.5 h-3.5" />
                 <span>{tr.saveChanges}</span>
               </button>
@@ -829,6 +1225,14 @@ export default function ProfilePage(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
+        />
+      )}
     </div>
   );
 }

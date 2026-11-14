@@ -1,18 +1,10 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react';
-
-// ============================================================
-// 🎨 FINAL THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
+import { THEME } from '@renderer/theme/theme';
+import { customerService } from '@renderer/services/customerService';
 
 // ============================================================
 // 🌍 LANGUAGE
@@ -97,6 +89,12 @@ const t = {
     errHasDocuments: (name: string, n: number) =>
       `${name} has ${n} document${n === 1 ? '' : 's'} and cannot be deleted.`,
     errDeleteStorage: 'Could not delete — storage may be full.',
+    errorTitle: 'Something went wrong',
+    errLoadCustomers: 'Could not load customers',
+    errSaveCustomer: 'Could not save customer',
+    errDeleteCustomer: 'Could not delete customer',
+    loading: 'Loading…',
+    ok: 'OK',
     showing: 'Showing',
     of: 'of',
     // Revenue card labels
@@ -180,6 +178,12 @@ const t = {
     errHasDocuments: (name: string, n: number) =>
       `${name} لديه ${n} مستند ولا يمكن حذفه.`,
     errDeleteStorage: 'تعذر الحذف — قد تكون مساحة التخزين ممتلئة.',
+    errorTitle: 'حدث خطأ ما',
+    errLoadCustomers: 'تعذر تحميل العملاء',
+    errSaveCustomer: 'تعذر حفظ العميل',
+    errDeleteCustomer: 'تعذر حذف العميل',
+    loading: 'جارٍ التحميل…',
+    ok: 'موافق',
     showing: 'عرض',
     of: 'من',
     revenue: 'الإيراد',
@@ -262,6 +266,12 @@ const t = {
     errHasDocuments: (name: string, n: number) =>
       `${name} کے پاس ${n} دستاویز ہیں اور اسے حذف نہیں کیا جا سکتا۔`,
     errDeleteStorage: 'حذف نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errorTitle: 'کچھ غلط ہو گیا',
+    errLoadCustomers: 'کسٹمرز لوڈ نہیں ہو سکے',
+    errSaveCustomer: 'کسٹمر محفوظ نہیں ہو سکا',
+    errDeleteCustomer: 'کسٹمر حذف نہیں ہو سکا',
+    loading: 'لوڈ ہو رہا ہے…',
+    ok: 'ٹھیک ہے',
     showing: 'دکھا رہے ہیں',
     of: 'میں سے',
     revenue: 'آمدنی',
@@ -344,6 +354,12 @@ const t = {
     errHasDocuments: (name: string, n: number) =>
       `${name} के पास ${n} दस्तावेज़ हैं और इसे हटाया नहीं जा सकता।`,
     errDeleteStorage: 'हटाया नहीं जा सका — स्टोरेज भरा हो सकता है।',
+    errorTitle: 'कुछ गलत हो गया',
+    errLoadCustomers: 'ग्राहक लोड नहीं हो सके',
+    errSaveCustomer: 'ग्राहक सहेजा नहीं जा सका',
+    errDeleteCustomer: 'ग्राहक हटाया नहीं जा सका',
+    loading: 'लोड हो रहा है…',
+    ok: 'ठीक है',
     showing: 'दिखा रहे हैं',
     of: 'में से',
     revenue: 'राजस्व',
@@ -365,7 +381,7 @@ type Translations = {
 // TYPES
 // ============================================================
 type Customer = {
-  /** PRIMARY KEY — equals the normalized phone (with country code) or, if empty, the normalized phoneAlt */
+  /** Supabase UUID */
   id: string;
   name: string;
   company: string;
@@ -388,6 +404,62 @@ type CustomerInput = {
   phoneAlt: string;
   address: string;
   city: string;
+};
+
+/** Row exactly as it comes from Supabase (snake_case) */
+type DbCustomer = {
+  id: string;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  phone_alt: string | null;
+  address: string | null;
+  city: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+/** DB row -> UI customer. id is the Supabase UUID. */
+const mapCustomer = (r: DbCustomer): Customer => ({
+  id: r.id,
+  name: r.name ?? '',
+  company: r.company ?? '',
+  email: r.email ?? '',
+  phone: r.phone ?? '',
+  phoneAlt: r.phone_alt ?? '',
+  address: r.address ?? '',
+  city: r.city ?? '',
+  createdAt: r.created_at,
+  updatedAt: r.updated_at ?? r.created_at,
+});
+
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
+};
+
+/** Supabase throws plain objects (message/details/hint/code), not Error instances */
+const describeError = (err: unknown): Omit<ErrorInfo, 'title'> => {
+  if (err && typeof err === 'object') {
+    const e = err as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+    };
+    const details = [e.details, e.hint ? `Hint: ${e.hint}` : '']
+      .filter(Boolean)
+      .join('\n');
+    return {
+      message: e.message || JSON.stringify(err),
+      details: details || undefined,
+      code: e.code,
+    };
+  }
+  return { message: String(err) };
 };
 
 type SalesDocument = {
@@ -517,7 +589,7 @@ const Icons = {
 // ============================================================
 // CONSTANTS
 // ============================================================
-const CUSTOMERS_KEY = 'zakhira_sales_customers';
+// Documents are still stored locally (no documents service yet)
 const DOCUMENTS_KEY = 'zakhira_sales_documents';
 const PAGE_SIZE = 10;
 const INTL_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
@@ -526,10 +598,7 @@ const INTL_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 // HELPERS
 // ============================================================
 
-/**
- * Normalizes a phone number. The result is used as the customer's
- * PRIMARY KEY (customer.id), so two customers can never share it.
- */
+/** Normalizes a phone number (strips spaces/dashes, 00 -> +). */
 const normalizePhone = (raw: string): string => {
   let s = raw.trim().replace(/[\s\-().]/g, '');
   if (s.startsWith('00')) s = `+${s.slice(2)}`;
@@ -543,7 +612,6 @@ const validateIntlPhone = (raw: string, tr: Translations): string | null => {
   if (!INTL_PHONE_REGEX.test(normalized)) return tr.errPhoneInvalid;
   return null;
 };
-
 
 /**
  * Smart comparison: treats "03237594869" and "+923237594869" as the SAME
@@ -602,34 +670,8 @@ const getStoredLanguage = (): Language => {
 const isRTLLang = (lang: Language): boolean => lang === 'ar' || lang === 'ur';
 
 // ============================================================
-// STORAGE
+// STORAGE (documents only — customers now live in Supabase)
 // ============================================================
-const loadCustomers = (): Customer[] => {
-  try {
-    const raw = localStorage.getItem(CUSTOMERS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((c: Customer) => ({
-      ...c,
-      email: c.email || '',
-      phone: c.phone || '',
-      phoneAlt: c.phoneAlt || '',
-    }));
-  } catch {
-    return [];
-  }
-};
-
-const saveCustomers = (list: Customer[]): boolean => {
-  try {
-    localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const loadDocuments = (): SalesDocument[] => {
   try {
     const raw = localStorage.getItem(DOCUMENTS_KEY);
@@ -638,98 +680,6 @@ const loadDocuments = (): SalesDocument[] => {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
-  }
-};
-
-const saveDocuments = (list: SalesDocument[]): boolean => {
-  try {
-    localStorage.setItem(DOCUMENTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * ONE-TIME MIGRATION (safe to run on every load — it does nothing
- * once all customers are already in the 2-phone-field format).
- *
- * - Old customers had random ids like "cus-xxxx" and/or a single phone
- *   with a mode flag. Now: phone (with code) + phoneAlt (without code),
- *   and id = primary phone key.
- * - Documents linked to the old id are re-linked to the new id.
- * - If old data already contains duplicate keys, the oldest customer is
- *   kept and the duplicates' documents are re-linked to it.
- */
-const migrateToPhoneKeys = (): void => {
-  try {
-    const list = loadCustomers();
-    if (list.length === 0) return;
-
-    const prepared = list.map((c) => {
-      const legacy = c as Customer & { phoneMode?: 'intl' | 'local' };
-      let phone = normalizePhone(c.phone || '');
-      let phoneAlt = normalizePhone(c.phoneAlt || '');
-      // Old single-phone records that were saved without validation
-      if (
-        phone &&
-        !phoneAlt &&
-        (legacy.phoneMode === 'local' ||
-          (legacy.phoneMode === undefined && !INTL_PHONE_REGEX.test(phone)))
-      ) {
-        phoneAlt = phone;
-        phone = '';
-      }
-      const key = phone || phoneAlt || c.id;
-      const changed =
-        c.id !== key ||
-        (c.phone || '') !== phone ||
-        (c.phoneAlt || '') !== phoneAlt ||
-        'phoneMode' in c;
-      return { c, phone, phoneAlt, key, changed };
-    });
-
-    if (!prepared.some((p) => p.changed)) return;
-
-    const idMap = new Map<string, string>(); // oldId -> newId
-    const kept = new Map<string, Customer>(); // newId -> customer
-
-    const oldestFirst = [...prepared].sort((a, b) =>
-      (a.c.createdAt || '').localeCompare(b.c.createdAt || '')
-    );
-
-    for (const p of oldestFirst) {
-      idMap.set(p.c.id, p.key);
-      if (!kept.has(p.key)) {
-        const clean: Customer & { phoneMode?: unknown } = {
-          ...p.c,
-          id: p.key,
-          phone: p.phone,
-          phoneAlt: p.phoneAlt,
-        };
-        delete clean.phoneMode;
-        kept.set(p.key, clean);
-      }
-    }
-
-    const newList = Array.from(kept.values()).sort((a, b) =>
-      (b.createdAt || '').localeCompare(a.createdAt || '')
-    );
-
-    const docs = loadDocuments();
-    const newDocs = docs.map((d) =>
-      d.customerId && idMap.has(d.customerId)
-        ? { ...d, customerId: idMap.get(d.customerId) }
-        : d
-    );
-
-    // Save documents first, then customers (roll back docs if customers fail)
-    if (!saveDocuments(newDocs)) return;
-    if (!saveCustomers(newList)) {
-      saveDocuments(docs);
-    }
-  } catch {
-    // ignore — migration will retry on next load
   }
 };
 
@@ -892,6 +842,56 @@ function ConfirmModal({
 }
 
 // ============================================================
+// ERROR MODAL (shows backend errors in a popup)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <Modal title={info.title} onClose={onClose} maxWidth="max-w-md" z="z-[60]">
+      <div className="flex items-start gap-2 mb-3">
+        <span className="mt-0.5" style={{ color: '#dc2626' }}>
+          {Icons.alert}
+        </span>
+        <p
+          className="text-[13px] font-semibold break-words"
+          style={{ color: THEME.charcoal }}
+        >
+          {info.message}
+        </p>
+      </div>
+      {(info.details || info.code) && (
+        <div
+          dir="ltr"
+          className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+          style={{
+            background: '#FFFFFF',
+            border: `1px solid ${THEME.mutedOlive}30`,
+            color: THEME.mutedOlive,
+          }}
+        >
+          {info.code ? `Code: ${info.code}\n` : ''}
+          {info.details}
+        </div>
+      )}
+      <button
+        onClick={onClose}
+        className="w-full h-9 rounded-full text-[13px] font-bold cursor-pointer"
+        style={{ background: THEME.warmBrass, color: THEME.warmIvory }}
+      >
+        {okLabel}
+      </button>
+    </Modal>
+  );
+}
+
+// ============================================================
 // PAGINATION
 // ============================================================
 function Pagination({
@@ -992,13 +992,17 @@ function Pagination({
 // ============================================================
 function CustomerFormModal({
   customer,
+  existing,
   onClose,
   onSaved,
+  onError,
   tr,
 }: {
   customer?: Customer | null;
+  existing: Customer[];
   onClose: () => void;
   onSaved: (c: Customer) => void;
+  onError: (title: string, err: unknown) => void;
   tr: Translations;
 }): React.JSX.Element {
   const [form, setForm] = useState<CustomerInput>({
@@ -1015,11 +1019,13 @@ function CustomerFormModal({
     Partial<Record<keyof CustomerInput | 'phoneGroup', string>>
   >({});
   const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const set = (k: keyof CustomerInput, v: string): void =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving) return;
     const e: Partial<Record<keyof CustomerInput | 'phoneGroup', string>> = {};
     if (!form.name.trim()) e.name = tr.errNameRequired;
 
@@ -1038,9 +1044,8 @@ function CustomerFormModal({
     const emailErr = validateEmail(form.email, tr);
     if (emailErr) e.email = emailErr;
 
-    // Always check against the freshest data in storage
-    const list = loadCustomers();
-    const others = list.filter((c) => c.id !== customer?.id);
+    // Quick duplicate check on loaded data (DB errors are handled below too)
+    const others = existing.filter((c) => c.id !== customer?.id);
 
     // 🔒 UNIQUE PHONE — any number used by another customer is blocked
     if (intl && !e.phone) {
@@ -1060,67 +1065,27 @@ function CustomerFormModal({
     setSaveError('');
     if (Object.keys(e).length > 0) return;
 
-    const now = new Date().toISOString();
-    const key = intl || alt; // 🔑 primary key
+    const payload = {
+      name: form.name.trim(),
+      company: form.company.trim() || null,
+      email: form.email.trim() || null,
+      phone: intl || null,
+      phone_alt: alt || null,
+      address: form.address.trim() || null,
+      city: form.city.trim() || null,
+    };
 
-    if (customer) {
-      // Primary key can change if phones changed → id changes too
-      const updated: Customer = {
-        ...customer,
-        id: key,
-        name: form.name.trim(),
-        company: form.company.trim(),
-        email: form.email.trim(),
-        phone: intl,
-        phoneAlt: alt,
-        address: form.address.trim(),
-        city: form.city.trim(),
-        updatedAt: now,
-      };
-
-      const idChanged = updated.id !== customer.id;
-      let oldDocs: SalesDocument[] | null = null;
-
-      // Re-link this customer's documents to the new key
-      if (idChanged) {
-        oldDocs = loadDocuments();
-        const relinked = oldDocs.map((d) =>
-          d.customerId === customer.id ? { ...d, customerId: updated.id } : d
-        );
-        if (!saveDocuments(relinked)) {
-          setSaveError(tr.errStorageFull);
-          return;
-        }
-      }
-
-      const ok = saveCustomers(
-        list.map((c) => (c.id === customer.id ? updated : c))
-      );
-      if (!ok) {
-        if (oldDocs) saveDocuments(oldDocs); // roll back
-        setSaveError(tr.errStorageFull);
-        return;
-      }
-      onSaved(updated);
-    } else {
-      const newCustomer: Customer = {
-        id: key,
-        name: form.name.trim(),
-        company: form.company.trim(),
-        email: form.email.trim(),
-        phone: intl,
-        phoneAlt: alt,
-        address: form.address.trim(),
-        city: form.city.trim(),
-        createdAt: now,
-        updatedAt: now,
-      };
-      const ok = saveCustomers([newCustomer, ...list]);
-      if (!ok) {
-        setSaveError(tr.errStorageFull);
-        return;
-      }
-      onSaved(newCustomer);
+    setSaving(true);
+    try {
+      const row = customer
+        ? await customerService.updateCustomer(customer.id, payload)
+        : await customerService.createCustomer(payload);
+      onSaved(mapCustomer(row as DbCustomer));
+    } catch (err) {
+      setSaveError(describeError(err).message);
+      onError(tr.errSaveCustomer, err); // console + popup
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1306,8 +1271,9 @@ function CustomerFormModal({
         style={{ borderTop: `1px solid ${THEME.mutedOlive}20` }}
       >
         <button
-          onClick={submit}
-          className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5"
+          onClick={() => void submit()}
+          disabled={saving}
+          className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
           style={{
             background: THEME.warmBrass,
             color: THEME.warmIvory,
@@ -1491,15 +1457,12 @@ function DetailRow({
 // MAIN COMPONENT
 // ============================================================
 export default function CustomersPage(): React.JSX.Element {
-  // Migration runs first so customers/documents are consistent
-  // (id = phone number) before they are read into state.
-  const [customers, setCustomers] = useState<Customer[]>(() => {
-    migrateToPhoneKeys();
-    return loadCustomers();
-  });
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [documents, setDocuments] = useState<SalesDocument[]>(() =>
     loadDocuments()
   );
+  const [loading, setLoading] = useState(true);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -1523,26 +1486,40 @@ export default function CustomersPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
-  // Reload on focus / sales update
-  useEffect(() => {
-    const refresh = () => {
-      setCustomers(loadCustomers());
-      setDocuments(loadDocuments());
-    };
-    window.addEventListener('storage', refresh);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('zakhira:sales-updated', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('zakhira:sales-updated', refresh);
-    };
-  }, []);
+  /** Logs to console AND shows the popup */
+  const reportError = (title: string, err: unknown): void => {
+    console.error(`[Customers] ${title}`, err);
+    setErrorInfo({ title, ...describeError(err) });
+  };
 
-  const refresh = (): void => {
-    setCustomers(loadCustomers());
+  const refresh = async (silent = false): Promise<void> => {
+    try {
+      const rows = await customerService.getCustomers();
+      setCustomers((rows as DbCustomer[]).map(mapCustomer));
+    } catch (err) {
+      // Background refreshes only log; the first/explicit load shows the popup
+      if (silent) console.error('[Customers] background refresh failed', err);
+      else reportError(tr.errLoadCustomers, err);
+    } finally {
+      setLoading(false);
+    }
     setDocuments(loadDocuments());
   };
+
+  // Initial load + reload on focus / sales update
+  useEffect(() => {
+    void refresh(false);
+    const bg = (): void => void refresh(true);
+    window.addEventListener('storage', bg);
+    window.addEventListener('focus', bg);
+    window.addEventListener('zakhira:sales-updated', bg);
+    return () => {
+      window.removeEventListener('storage', bg);
+      window.removeEventListener('focus', bg);
+      window.removeEventListener('zakhira:sales-updated', bg);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showSuccess = (msg: string): void => {
     setSuccessMsg(msg);
@@ -1649,14 +1626,9 @@ export default function CustomersPage(): React.JSX.Element {
     search.trim() !== '' || cityFilter !== 'All' || sortBy !== 'date-desc';
 
   const handleSaved = (c: Customer): void => {
-    refresh();
+    void refresh(true);
     setShowForm(false);
     const wasEdit = editingCustomer !== null;
-
-    // Keep revenue selector pointing at the same customer if the key changed
-    if (wasEdit && editingCustomer && revenueCustomerId === editingCustomer.id) {
-      setRevenueCustomerId(c.id);
-    }
 
     setEditingCustomer(null);
     showSuccess(wasEdit ? tr.toastUpdated(c.name) : tr.toastCreated(c.name));
@@ -1667,22 +1639,22 @@ export default function CustomersPage(): React.JSX.Element {
     setShowForm(true);
   };
 
-  const handleDelete = (c: Customer): void => {
+  const handleDelete = async (c: Customer): Promise<void> => {
     const count = documentCountByCustomer.get(c.id) ?? 0;
     if (count > 0) {
       showError(tr.errHasDocuments(c.name, count));
       setDeleteTarget(null);
       return;
     }
-    const list = loadCustomers().filter((x) => x.id !== c.id);
-    const ok = saveCustomers(list);
-    if (!ok) {
-      showError(tr.errDeleteStorage);
+    try {
+      await customerService.deleteCustomer(c.id);
+    } catch (err) {
       setDeleteTarget(null);
+      reportError(tr.errDeleteCustomer, err); // console + popup
       return;
     }
     if (revenueCustomerId === c.id) setRevenueCustomerId('');
-    refresh();
+    await refresh(true);
     setDeleteTarget(null);
     showSuccess(tr.toastDeleted(c.name));
   };
@@ -1996,7 +1968,13 @@ export default function CustomersPage(): React.JSX.Element {
           </h2>
         </div>
 
-        {paginated.length > 0 ? (
+        {loading ? (
+          <div className="py-12 text-center">
+            <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
+              {tr.loading}
+            </p>
+          </div>
+        ) : paginated.length > 0 ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -2217,12 +2195,14 @@ export default function CustomersPage(): React.JSX.Element {
       {showForm && (
         <CustomerFormModal
           customer={editingCustomer}
+          existing={customers}
           tr={tr}
           onClose={() => {
             setShowForm(false);
             setEditingCustomer(null);
           }}
           onSaved={handleSaved}
+          onError={reportError}
         />
       )}
 
@@ -2243,8 +2223,16 @@ export default function CustomersPage(): React.JSX.Element {
           confirmLabel={tr.deleteConfirm}
           cancelLabel={tr.cancel}
           danger
-          onConfirm={() => handleDelete(deleteTarget)}
+          onConfirm={() => void handleDelete(deleteTarget)}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
         />
       )}
     </div>

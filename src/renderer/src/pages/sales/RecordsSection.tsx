@@ -1,9 +1,13 @@
 /* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { THEME } from '@renderer/theme/theme';
+import { recordsService, type RecordsDocument } from '@renderer/services/recordsService';
 import {
   PrintFormat,
   PRINT_FORMATS,
@@ -12,17 +16,6 @@ import {
   saveLastPrintFormat,
   loadDefaultPrintFormat,
 } from '../settings/SettingsPage';
-
-// ============================================================
-// THEME (self-contained)
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
 
 type Language = 'en' | 'ar' | 'ur' | 'hi';
 
@@ -56,6 +49,7 @@ const rbT = {
     colStatus: 'Status',
     colActions: 'Actions',
     noRecords: 'No records found',
+    loading: 'Loading...',
     actPreview: 'Preview',
     actWhatsApp: 'WhatsApp',
     actApprove: 'Approve',
@@ -149,10 +143,11 @@ const rbT = {
     toastReturnCreated: (num: string) => `Return created — ${num}`,
     toastWhatsApp: 'WhatsApp message prepared',
     toastPrintOpened: 'Print window opened',
-    toastStorageErr: 'Could not update — storage may be full.',
-    toastSaveErr: 'Could not save return — storage may be full.',
+    toastStorageErr: 'Could not update — please try again.',
+    toastSaveErr: 'Could not save — please try again.',
     toastAccErr: 'Could not create accounting entry.',
     toastStockErr: 'Could not update stock.',
+    toastLoadErr: 'Could not load records.',
     toastPopupBlocked: 'Pop-up blocked — allow pop-ups to print',
     histApproved: 'Approved',
     histRejected: 'Rejected',
@@ -247,6 +242,7 @@ const rbT = {
     colStatus: 'الحالة',
     colActions: 'الإجراءات',
     noRecords: 'لا توجد سجلات',
+    loading: 'جارٍ التحميل...',
     actPreview: 'معاينة',
     actWhatsApp: 'واتساب',
     actApprove: 'اعتماد',
@@ -340,10 +336,11 @@ const rbT = {
     toastReturnCreated: (num: string) => `تم إنشاء الإرجاع — ${num}`,
     toastWhatsApp: 'تم تجهيز رسالة واتساب',
     toastPrintOpened: 'تم فتح نافذة الطباعة',
-    toastStorageErr: 'تعذر التحديث — قد تكون مساحة التخزين ممتلئة.',
-    toastSaveErr: 'تعذر حفظ الإرجاع — قد تكون مساحة التخزين ممتلئة.',
+    toastStorageErr: 'تعذر التحديث — حاول مرة أخرى.',
+    toastSaveErr: 'تعذر الحفظ — حاول مرة أخرى.',
     toastAccErr: 'تعذر إنشاء القيد المحاسبي.',
     toastStockErr: 'تعذر تحديث المخزون.',
+    toastLoadErr: 'تعذر تحميل السجلات.',
     toastPopupBlocked: 'النوافذ المنبثقة محظورة — اسمح بها للطباعة',
     histApproved: 'اعتُمد',
     histRejected: 'رُفض',
@@ -438,6 +435,7 @@ const rbT = {
     colStatus: 'حالت',
     colActions: 'اقدامات',
     noRecords: 'کوئی ریکارڈ نہیں ملا',
+    loading: 'لوڈ ہو رہا ہے...',
     actPreview: 'جھلک',
     actWhatsApp: 'واٹس ایپ',
     actApprove: 'منظور کریں',
@@ -531,10 +529,11 @@ const rbT = {
     toastReturnCreated: (num: string) => `واپسی بن گئی — ${num}`,
     toastWhatsApp: 'واٹس ایپ پیغام تیار ہے',
     toastPrintOpened: 'پرنٹ ونڈو کھل گئی',
-    toastStorageErr: 'اپ ڈیٹ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
-    toastSaveErr: 'واپسی محفوظ نہیں ہو سکی — اسٹوریج بھری ہو سکتی ہے۔',
+    toastStorageErr: 'اپ ڈیٹ نہیں ہو سکا — دوبارہ کوشش کریں۔',
+    toastSaveErr: 'محفوظ نہیں ہو سکا — دوبارہ کوشش کریں۔',
     toastAccErr: 'اکاؤنٹنگ اندراج نہیں بن سکا۔',
     toastStockErr: 'اسٹاک اپ ڈیٹ نہیں ہو سکا۔',
+    toastLoadErr: 'ریکارڈ لوڈ نہیں ہو سکے۔',
     toastPopupBlocked: 'پاپ اپ بلاک ہے — پرنٹ کے لیے اجازت دیں',
     histApproved: 'منظور شدہ',
     histRejected: 'مسترد شدہ',
@@ -629,6 +628,7 @@ const rbT = {
     colStatus: 'स्थिति',
     colActions: 'क्रियाएँ',
     noRecords: 'कोई रिकॉर्ड नहीं मिला',
+    loading: 'लोड हो रहा है...',
     actPreview: 'पूर्वावलोकन',
     actWhatsApp: 'व्हाट्सएप',
     actApprove: 'स्वीकृत करें',
@@ -722,10 +722,11 @@ const rbT = {
     toastReturnCreated: (num: string) => `वापसी बनाई गई — ${num}`,
     toastWhatsApp: 'व्हाट्सएप संदेश तैयार',
     toastPrintOpened: 'प्रिंट विंडो खुली',
-    toastStorageErr: 'अपडेट नहीं हो सका — स्टोरेज भरा हो सकता है।',
-    toastSaveErr: 'वापसी सहेजी नहीं जा सकी — स्टोरेज भरा हो सकता है।',
+    toastStorageErr: 'अपडेट नहीं हो सका — फिर कोशिश करें।',
+    toastSaveErr: 'सहेजा नहीं जा सका — फिर कोशिश करें।',
     toastAccErr: 'लेखांकन प्रविष्टि नहीं बन सकी।',
     toastStockErr: 'स्टॉक अपडेट नहीं हो सका।',
+    toastLoadErr: 'रिकॉर्ड लोड नहीं हो सके।',
     toastPopupBlocked: 'पॉप-अप अवरुद्ध — प्रिंट के लिए अनुमति दें',
     histApproved: 'स्वीकृत',
     histRejected: 'अस्वीकृत',
@@ -872,24 +873,6 @@ type ReturnRecord = {
   createdAt: string;
 };
 
-type StockMovementType = 'sale' | 'return' | 'adjustment';
-
-type StockMovement = {
-  id: string;
-  productId: string;
-  productName: string;
-  sku?: string;
-  type: StockMovementType;
-  qty: number;
-  before: number;
-  after: number;
-  reference: string;
-  referenceId: string;
-  date: string;
-  createdBy: string;
-  createdAt: string;
-};
-
 type DocumentRecord = {
   id: string;
   documentType: DocumentType;
@@ -944,41 +927,15 @@ type SortKey =
   | 'amountDesc'
   | 'amountAsc';
 
+type CompanyInfo = { name: string; address: string; phone: string; vat: string };
+
 // ============================================================
-// ACCOUNTING HELPERS
+// HELPERS
 // ============================================================
-type AccountingType = 'In' | 'Out' | 'Return';
-type AccountingMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
-type AccountingTransaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: AccountingType;
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: AccountingMode;
-  sourceDocumentId?: string;
-  sourceModule?: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-  createdAt: string;
-  linkedInvoiceId?: string;
-  hasReturn?: boolean;
-  returnTransactionId?: string;
-  originalTransactionId?: string;
-};
-
-const TRANSACTIONS_KEY = 'zakhira_transactions';
-
-const uid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
 const roundMoney = (n: number): number =>
   Math.round((n + Number.EPSILON) * 100) / 100;
 
-// ✅ NO "SAR" prefix — plain number only
+// plain number only (no currency prefix)
 const formatMoney = (n: number): string => {
   const abs = Math.abs(n);
   return `${n < 0 ? '-' : ''}${abs.toLocaleString('en-US', {
@@ -1020,436 +977,116 @@ const getStoredLanguage = (): Language => {
 
 const isRTLLang = (l: Language): boolean => l === 'ar' || l === 'ur';
 
-const getCurrentUser = (): { id: string; name: string } => {
-  try {
-    const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
-    return {
-      id: u.id || u._id || u.email || '',
-      name: u.name || u.fullName || u.username || u.email || 'User',
-    };
-  } catch {
-    return { id: '', name: 'User' };
-  }
-};
+const DEFAULT_COMPANY: CompanyInfo = { name: 'Zakhira', address: '', phone: '', vat: '' };
 
-const getTenantId = (): string => {
-  try {
-    const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
-    return String(u.tenantId || u.tenant_id || u.companyId || '');
-  } catch {
-    return '';
-  }
-};
-
-const getCompanyInfo = () => {
-  try {
-    const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
-    return {
-      name: u.companyName || u.company || u.businessName || 'Zakhira',
-      address: u.companyAddress || u.address || '',
-      phone: u.companyPhone || u.phone || '',
-      vat: u.vatNumber || '',
-    };
-  } catch {
-    return { name: 'Zakhira', address: '', phone: '', vat: '' };
-  }
-};
-
-const loadAccountingList = (): AccountingTransaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveAccountingList = (list: AccountingTransaction[]): boolean => {
-  try {
-    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const genAccountingTxnNo = (existing: AccountingTransaction[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `TXN-${year}-`;
-  const numbers = existing
-    .filter((x) => x.transactionNo.startsWith(prefix))
-    .map((x) => Number(x.transactionNo.split('-')[2]))
-    .filter((n) => !Number.isNaN(n));
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-};
-
-const mapPaymentMode = (m: PaymentMethod | ''): AccountingMode => {
-  if (m === 'Cash') return 'Cash';
-  if (m === 'Card') return 'Card';
-  if (m === 'Bank Transfer') return 'Bank Transfer';
-  return 'Other';
-};
-
-const syncAccountingEntry = (data: {
-  type: AccountingType;
-  amount: number;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: AccountingMode;
-  sourceDocumentId: string;
-  sourceModule: 'sales' | 'inventory' | 'manual';
-  notes?: string;
-}): AccountingTransaction | null => {
-  const existing = loadAccountingList();
-  const idx = existing.findIndex(
-    (x) => x.sourceDocumentId === data.sourceDocumentId
-  );
-  if (idx >= 0) {
-    const updated: AccountingTransaction = {
-      ...existing[idx],
-      amount: data.amount,
-      status: data.status,
-      mode: data.mode,
-      date: data.date,
-      notes: data.notes || existing[idx].notes,
-    };
-    const newList = [...existing];
-    newList[idx] = updated;
-    saveAccountingList(newList);
-    return updated;
-  }
-  const txn: AccountingTransaction = {
-    id: uid('txn'),
-    transactionNo: genAccountingTxnNo(existing),
-    date: data.date,
-    customerName: data.customerName,
-    companyName: data.companyName,
-    invoiceRef: data.invoiceRef,
-    type: data.type,
-    amount: data.amount,
-    status: data.status,
-    mode: data.mode,
-    sourceDocumentId: data.sourceDocumentId,
-    sourceModule: data.sourceModule,
-    notes: data.notes,
-    createdAt: new Date().toISOString(),
-  };
-  saveAccountingList([txn, ...existing]);
-  return txn;
-};
-
-const deleteAccountingEntry = (documentId: string): boolean => {
-  const existing = loadAccountingList();
-  const updated = existing.filter(
-    (x) =>
-      !(
-        x.type === 'In' &&
-        (x.sourceDocumentId === documentId || x.linkedInvoiceId === documentId)
-      )
-  );
-  if (updated.length === existing.length) return false;
-  return saveAccountingList(updated);
-};
-
-const hasEntriesForDoc = (documentId: string): boolean =>
-  loadAccountingList().some(
-    (x) =>
-      x.type === 'In' &&
-      (x.sourceDocumentId === documentId || x.linkedInvoiceId === documentId)
-  );
-
-const removePlaceholderEntry = (documentId: string): void => {
-  const existing = loadAccountingList();
-  const updated = existing.filter(
-    (x) =>
-      !(
-        x.type === 'In' &&
-        x.sourceDocumentId === documentId &&
-        x.status === 'Pending'
-      )
-  );
-  if (updated.length !== existing.length) saveAccountingList(updated);
-};
-
-const createPaymentEntry = (
-  record: DocumentRecord,
-  payment: PaymentRecord
-): AccountingTransaction | null => {
-  const existing = loadAccountingList();
-  const docWord = record.documentType === 'quotation' ? 'Quotation' : 'Invoice';
-  const txn: AccountingTransaction = {
-    id: uid('txn'),
-    transactionNo: genAccountingTxnNo(existing),
-    date: payment.date,
-    customerName: record.customerSnapshot.name,
-    companyName: record.customerSnapshot.company,
-    invoiceRef: record.orderNumber,
-    type: 'In',
-    amount: payment.amount,
-    status: payment.balanceAfter > 0 ? 'Partially Paid' : 'Paid',
-    mode: mapPaymentMode(payment.method),
-    sourceDocumentId: `${record.id}-pay-${payment.id}`,
-    sourceModule: 'sales',
-    linkedInvoiceId: record.id,
-    notes: `Payment received for ${docWord} ${record.orderNumber} (Balance after: ${payment.balanceAfter})${
-      payment.note ? ` — ${payment.note}` : ''
-    }`,
-    createdAt: new Date().toISOString(),
-  };
-  if (!saveAccountingList([txn, ...existing])) return null;
-  return txn;
-};
-
-const ensurePaymentEntries = (record: DocumentRecord): void => {
-  (record.payments || []).forEach((p) => {
-    const sid = `${record.id}-pay-${p.id}`;
-    const exists = loadAccountingList().some((x) => x.sourceDocumentId === sid);
-    if (!exists) createPaymentEntry(record, p);
-  });
-};
-
-const recordPaymentInAccounting = (
-  record: DocumentRecord,
-  payment: PaymentRecord
-): AccountingTransaction | null => {
-  if (!hasEntriesForDoc(record.id)) ensurePaymentEntries(record);
-  removePlaceholderEntry(record.id);
-  return createPaymentEntry(record, payment);
-};
-
-const createPartialReturnEntry = (data: {
-  amount: number;
-  date: string;
-  customerName: string;
-  companyName: string;
-  linkedInvoiceRef: string;
-  linkedInvoiceId: string;
-  linkedInvoiceTxnId: string;
-  returnNumber: string;
-  notes?: string;
-}): AccountingTransaction | null => {
-  const existing = loadAccountingList();
-  const sourceDocumentId = `${data.linkedInvoiceId}-return-${data.returnNumber}`;
-  const txn: AccountingTransaction = {
-    id: uid('txn'),
-    transactionNo: genAccountingTxnNo(existing),
-    date: data.date,
-    customerName: data.customerName,
-    companyName: data.companyName,
-    invoiceRef: data.linkedInvoiceRef,
-    type: 'Out',
-    amount: data.amount,
-    status: 'Returned',
-    mode: 'Other',
-    linkedInvoiceId: data.linkedInvoiceId,
-    sourceDocumentId,
-    sourceModule: 'sales',
-    notes:
-      data.notes ||
-      `Return ${data.returnNumber} linked to ${data.linkedInvoiceRef}`,
-    createdAt: new Date().toISOString(),
-    originalTransactionId: data.linkedInvoiceTxnId,
-  };
-  saveAccountingList([txn, ...existing]);
-  return txn;
-};
-
-const markOriginalInvoiceReturn = (
-  documentId: string,
-  returnTransactionId: string
-): void => {
-  const existing = loadAccountingList();
-  const updated = existing.map((x) =>
-    x.type === 'In' &&
-    (x.sourceDocumentId === documentId || x.linkedInvoiceId === documentId)
-      ? { ...x, hasReturn: true, returnTransactionId }
-      : x
-  );
-  saveAccountingList(updated);
-};
-
-// ============================================================
-// 📦 STOCK HELPERS
-// ============================================================
-const PRODUCTS_KEY = 'zakhira_inventory_products';
-const STOCK_MOVEMENTS_KEY = 'zakhira_stock_movements';
-
-const loadStockMovements = (): StockMovement[] => {
-  try {
-    const raw = localStorage.getItem(STOCK_MOVEMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveStockMovements = (list: StockMovement[]): boolean => {
-  try {
-    localStorage.setItem(STOCK_MOVEMENTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-type RawProduct = {
-  id?: string;
-  name?: string;
-  sku?: string;
-  stock?: number;
-  quantity?: number;
-  onHand?: number;
-};
-
-const loadRawProducts = (): RawProduct[] => {
-  try {
-    const raw = localStorage.getItem(PRODUCTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveRawProducts = (list: RawProduct[]): boolean => {
-  try {
-    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const adjustStockAndLog = (
-  items: Array<{
-    productId: string;
-    productName: string;
-    sku?: string;
-    delta: number;
-  }>,
-  reference: string,
-  referenceId: string,
-  type: StockMovementType,
-  user: string
-): boolean => {
-  if (items.length === 0) return true;
-
-  const products = loadRawProducts();
-  if (products.length === 0) return true;
-
-  const movements = loadStockMovements();
-  const newMovements: StockMovement[] = [];
-  const dateNow = todayISO();
-  const createdAt = new Date().toISOString();
-
-  const updatedProducts = products.map((p) => {
-    const item = items.find((i) => String(i.productId) === String(p.id));
-    if (!item || item.delta === 0) return p;
-
-    const before = Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
-    const after = Math.max(0, before + item.delta);
-    if (after === before) return p;
-
-    newMovements.push({
-      id: uid('sm'),
-      productId: String(p.id),
-      productName: p.name || item.productName,
-      sku: p.sku || item.sku,
-      type,
-      qty: item.delta,
-      before,
-      after,
-      reference,
-      referenceId,
-      date: dateNow,
-      createdBy: user,
-      createdAt,
-    });
-
-    return {
-      ...p,
-      stock: after,
-      quantity: after,
-      onHand: after,
-    };
-  });
-
-  const okP = saveRawProducts(updatedProducts);
-  const okM = saveStockMovements([...newMovements, ...movements]);
-  return okP && okM;
-};
-
-// ============================================================
-// STORAGE
-// ============================================================
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-const HISTORY_KEY = 'zakhira_sales_status_history';
 const PAGE_SIZE = 10;
 const HANDOFF_VIEW_TXN_KEY = 'zakhira_accounting_view_txn';
 const HANDOFF_VIEW_INVOICE_KEY = 'zakhira_sales_view_invoice';
 
-const loadDocuments = (): DocumentRecord[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+// ============================================================
+// DB (snake_case) -> UI (camelCase) MAPPERS
+// ============================================================
+const mapDoc = (d: RecordsDocument): DocumentRecord => {
+  const payments: PaymentRecord[] = (d.payments || []).map((p: any) => ({
+    id: p.id,
+    date: p.payment_date,
+    amount: Number(p.amount),
+    method: (p.method || 'Cash') as PaymentMethod,
+    note: p.note || undefined,
+    balanceAfter: Number(p.balance_after),
+    recordedBy: p.recorded_by_name || '',
+    createdAt: p.created_at,
+  }));
+
+  const returnRecords: ReturnRecord[] = (d.returns || []).map((r: any) => ({
+    returnId: r.id,
+    returnNumber: r.return_number,
+    date: r.return_date,
+    reason: r.reason,
+    notes: r.notes || undefined,
+    items: (r.items || []).map((it: any) => ({
+      lineId: it.line_id,
+      productName: it.product_name,
+      price: Number(it.price),
+      originalQty: Number(it.original_qty),
+      returnQty: Number(it.return_qty),
+      subtotal: Number(it.subtotal),
+      taxAmount: Number(it.tax_amount),
+      totalAmount: Number(it.total_amount),
+    })),
+    subtotal: Number(r.subtotal),
+    taxTotal: Number(r.tax_total),
+    totalReturnAmount: Number(r.total_return_amount),
+    linkedTransactionId: r.linked_transaction_no || '',
+    createdBy: r.created_by_name || '',
+    createdAt: r.created_at,
+  }));
+
+  return {
+    id: d.id,
+    documentType: d.document_type,
+    orderNumber: d.order_number,
+    customerId: d.customer_id || '',
+    customerSnapshot: {
+      name: d.customer_name,
+      company: d.customer_company || '',
+      phone: d.customer_phone || d.customer_phone_alt || '',
+      email: d.customer_email || undefined,
+      address: d.customer_address || '',
+      city: d.customer_city || '',
+    },
+    issueDate: d.issue_date,
+    dueDate: d.due_date || undefined,
+    salesChannel: d.sales_channel,
+    updatedAt: d.updated_at,
+    status: d.status,
+    currency: d.currency,
+    notes: d.notes || '',
+    vatNumber: d.vat_number || '',
+    vatRate: Number(d.vat_rate) || 0,
+    lines: (d.lines || []).map((l: any) => ({
+      id: l.id,
+      productId: l.product_id || '',
+      material: l.material,
+      sku: l.sku || '',
+      category: l.category || undefined,
+      costPrice: l.cost_price != null ? Number(l.cost_price) : undefined,
+      description: l.description || undefined,
+      quantity: Number(l.quantity),
+      unitPrice: Number(l.unit_price),
+      discountType: (l.discount_type || 'percentage') as 'percentage' | 'fixed',
+      discountValue: Number(l.discount_value) || 0,
+      lineTotal: Number(l.line_total),
+    })),
+    subtotal: Number(d.subtotal),
+    discountTotal: Number(d.discount_total) || 0,
+    taxTotal: Number(d.tax_total) || 0,
+    grandTotal: Number(d.grand_total),
+    paymentStatus: d.payment_status,
+    paymentMethod: (d.payment_method || '') as PaymentMethod | '',
+    paymentAmount: Number(d.payment_amount) || 0,
+    paymentDate: d.payment_date || (payments.length ? payments[payments.length - 1].date : ''),
+    paymentReference: d.payment_reference || '',
+    balanceDue: Number(d.balance_due) || 0,
+    createdBy: d.created_by_name || '',
+    createdAt: d.created_at,
+    returnRecords,
+    payments,
+  };
 };
 
-const saveDocuments = (list: DocumentRecord[]): boolean => {
-  try {
-    localStorage.setItem(DOCUMENTS_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const loadHistory = (): StatusHistory[] => {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveHistory = (list: StatusHistory[]): boolean => {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const genReturnNumber = (existing: DocumentRecord[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `RET-${year}-`;
-  const allReturns = existing.flatMap((d) => d.returnRecords || []);
-  const numbers = allReturns
-    .map((r) => {
-      const m = r.returnNumber.match(/RET-\d+-(\d+)/);
-      return m ? Number(m[1]) : 0;
-    })
-    .filter((n) => !Number.isNaN(n));
-  const max = numbers.length ? Math.max(...numbers) : 0;
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-};
+const mapHistory = (docs: RecordsDocument[]): StatusHistory[] =>
+  docs.flatMap((d) =>
+    (d.history || []).map((h: any) => ({
+      id: h.id,
+      documentId: h.document_id,
+      oldStatus: (h.old_status || null) as WorkflowStatus | null,
+      newStatus: h.new_status as WorkflowStatus,
+      reason: h.reason || '',
+      changedBy: h.changed_by_name || '',
+      changedAt: h.changed_at,
+    }))
+  );
 
 const getCategory = (d: DocumentRecord): Category => {
   if (d.status === 'Approved') return 'Approved';
@@ -1493,10 +1130,9 @@ const sumPayments = (record: DocumentRecord): number =>
   roundMoney((record.payments || []).reduce((s, p) => s + p.amount, 0));
 
 /**
- * ✅ Minimum payment required to approve a record.
- *    - If nothing has been paid yet (unpaid) → at least 1 must be paid
- *      (or the whole remaining amount if it is smaller than 1).
- *    - If something was already paid before → no extra minimum.
+ * Minimum payment required to approve a record.
+ *  - nothing paid yet  -> at least 1 (or the whole remaining if smaller)
+ *  - already paid some -> no extra minimum
  */
 const MIN_APPROVE_PAYMENT = 1;
 const getMinApprovePayment = (paidBefore: number, remaining: number): number => {
@@ -1511,16 +1147,14 @@ const getReturnedQty = (record: DocumentRecord, lineId: string): number =>
   }, 0);
 
 /**
- * ✅ compute per-line discount (amount + percentage)
- *    - If line has discountValue > 0, that wins
- *    - Otherwise, we fall back to `record.discountTotal` (whole-invoice discount)
- *      split proportionally by lineTotal
+ * Per-line discount (amount + percentage).
+ *  - line discountValue > 0 wins
+ *  - otherwise fall back to record.discountTotal split by line share
  */
 const getLineDiscount = (
   record: DocumentRecord,
   line: DocumentLine
 ): { amount: number; pct: number; label: string } => {
-  // 1) Line-level discount saved explicitly
   if (line.discountValue && line.discountValue > 0) {
     const gross = roundMoney(line.unitPrice * line.quantity);
     let amount = 0;
@@ -1539,7 +1173,6 @@ const getLineDiscount = (
     };
   }
 
-  // 2) Fallback: invoice-level discount split by line share
   if (record.discountTotal && record.discountTotal > 0 && record.subtotal > 0) {
     const share = line.lineTotal / record.subtotal;
     const amount = roundMoney(record.discountTotal * share);
@@ -2052,17 +1685,78 @@ function PrintFormatPickerModal({
 }
 
 // ============================================================
+// PAYMENT METHOD RADIO GROUP (shared by approve + add payment)
+// ============================================================
+function PaymentMethodPicker({
+  name,
+  value,
+  onChange,
+  tr,
+}: {
+  name: string;
+  value: PaymentMethod;
+  onChange: (m: PaymentMethod) => void;
+  tr: RbTranslations;
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1">
+      {(['Cash', 'Bank Transfer', 'Card', 'Other'] as PaymentMethod[]).map((m) => {
+        const active = value === m;
+        const label =
+          m === 'Cash'
+            ? tr.methodCash
+            : m === 'Bank Transfer'
+              ? tr.methodBank
+              : m === 'Card'
+                ? tr.methodCard
+                : tr.methodOther;
+        return (
+          <label
+            key={m}
+            className="flex cursor-pointer items-center gap-1.5 text-[11px]"
+            style={{ color: THEME.charcoal }}
+          >
+            <input
+              type="radio"
+              name={name}
+              checked={active}
+              onChange={() => onChange(m)}
+              className="sr-only"
+            />
+            <span
+              className="flex h-3.5 w-3.5 items-center justify-center rounded-full border"
+              style={{
+                borderColor: active ? THEME.deepForest : `${THEME.mutedOlive}60`,
+              }}
+            >
+              {active && (
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: THEME.deepForest }}
+                />
+              )}
+            </span>
+            {label}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
 // APPROVE WITH PAYMENT MODAL
-// ✅ Unpaid records need a minimum payment (1) before approval
 // ============================================================
 function ApprovePaymentModal({
   record,
   tr,
+  busy,
   onClose,
   onConfirm,
 }: {
   record: DocumentRecord;
   tr: RbTranslations;
+  busy: boolean;
   onClose: () => void;
   onConfirm: (data: {
     amount: number;
@@ -2194,52 +1888,7 @@ function ApprovePaymentModal({
           <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
             {tr.paymentMethodLabel}
           </label>
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1">
-            {(['Cash', 'Bank Transfer', 'Card', 'Other'] as PaymentMethod[]).map(
-              (m) => {
-                const active = method === m;
-                const label =
-                  m === 'Cash'
-                    ? tr.methodCash
-                    : m === 'Bank Transfer'
-                      ? tr.methodBank
-                      : m === 'Card'
-                        ? tr.methodCard
-                        : tr.methodOther;
-                return (
-                  <label
-                    key={m}
-                    className="flex cursor-pointer items-center gap-1.5 text-[11px]"
-                    style={{ color: THEME.charcoal }}
-                  >
-                    <input
-                      type="radio"
-                      name="approvePaymentMethod"
-                      checked={active}
-                      onChange={() => setMethod(m)}
-                      className="sr-only"
-                    />
-                    <span
-                      className="flex h-3.5 w-3.5 items-center justify-center rounded-full border"
-                      style={{
-                        borderColor: active
-                          ? THEME.deepForest
-                          : `${THEME.mutedOlive}60`,
-                      }}
-                    >
-                      {active && (
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ background: THEME.deepForest }}
-                        />
-                      )}
-                    </span>
-                    {label}
-                  </label>
-                );
-              }
-            )}
-          </div>
+          <PaymentMethodPicker name="approvePaymentMethod" value={method} onChange={setMethod} tr={tr} />
         </div>
 
         <div>
@@ -2276,7 +1925,8 @@ function ApprovePaymentModal({
         >
           <button
             onClick={onClose}
-            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all"
+            disabled={busy}
+            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all disabled:opacity-50"
             style={{
               background: 'transparent',
               border: `2px solid ${THEME.mutedOlive}40`,
@@ -2287,7 +1937,7 @@ function ApprovePaymentModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={belowMin}
+            disabled={belowMin || busy}
             className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: '#16a34a',
@@ -2310,11 +1960,13 @@ function ApprovePaymentModal({
 function AddPaymentModal({
   record,
   tr,
+  busy,
   onClose,
   onSave,
 }: {
   record: DocumentRecord;
   tr: RbTranslations;
+  busy: boolean;
   onClose: () => void;
   onSave: (data: { amount: number; method: PaymentMethod; note?: string }) => void;
 }): React.JSX.Element {
@@ -2333,7 +1985,7 @@ function AddPaymentModal({
       setErr(tr.errAmountTooHigh);
       return;
     }
-    onSave({ amount: amt, method, note: note.trim() || undefined });
+    onSave({ amount: roundMoney(amt), method, note: note.trim() || undefined });
   };
 
   return (
@@ -2369,39 +2021,7 @@ function AddPaymentModal({
           <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
             {tr.paymentMethodLabel}
           </label>
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1">
-            {(['Cash', 'Bank Transfer', 'Card', 'Other'] as PaymentMethod[]).map((m) => {
-              const active = method === m;
-              const label =
-                m === 'Cash' ? tr.methodCash :
-                m === 'Bank Transfer' ? tr.methodBank :
-                m === 'Card' ? tr.methodCard : tr.methodOther;
-              return (
-                <label
-                  key={m}
-                  className="flex cursor-pointer items-center gap-1.5 text-[11px]"
-                  style={{ color: THEME.charcoal }}
-                >
-                  <input
-                    type="radio"
-                    name="addPaymentMethod"
-                    checked={active}
-                    onChange={() => setMethod(m)}
-                    className="sr-only"
-                  />
-                  <span
-                    className="flex h-3.5 w-3.5 items-center justify-center rounded-full border"
-                    style={{ borderColor: active ? THEME.deepForest : `${THEME.mutedOlive}60` }}
-                  >
-                    {active && (
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: THEME.deepForest }} />
-                    )}
-                  </span>
-                  {label}
-                </label>
-              );
-            })}
-          </div>
+          <PaymentMethodPicker name="addPaymentMethod" value={method} onChange={setMethod} tr={tr} />
         </div>
 
         <div>
@@ -2435,7 +2055,8 @@ function AddPaymentModal({
         <div className="flex gap-2 pt-3" style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}>
           <button
             onClick={onClose}
-            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all"
+            disabled={busy}
+            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all disabled:opacity-50"
             style={{
               background: 'transparent',
               border: `2px solid ${THEME.mutedOlive}40`,
@@ -2446,7 +2067,8 @@ function AddPaymentModal({
           </button>
           <button
             onClick={handleSubmit}
-            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5"
+            disabled={busy}
+            className="flex-1 h-9 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
             style={{
               background: THEME.warmBrass,
               color: THEME.warmIvory,
@@ -2656,11 +2278,13 @@ function OriginalInvoicePreviewModal({
 function ReturnModal({
   record,
   tr,
+  busy,
   onClose,
   onSubmit,
 }: {
   record: DocumentRecord;
   tr: RbTranslations;
+  busy: boolean;
   onClose: () => void;
   onSubmit: (data: {
     reason: string;
@@ -2699,6 +2323,7 @@ function ReturnModal({
     const max = availableQty[lineId] || 0;
     const clean = Math.max(0, Math.min(max, Math.floor(value) || 0));
     setReturnQtys((prev) => ({ ...prev, [lineId]: clean }));
+    setErr('');
   };
 
   const returnItems: ReturnItem[] = record.lines.map((l) => {
@@ -2713,10 +2338,7 @@ function ReturnModal({
     const perUnitPaid = lineGrossPaid / originalQty;
     const totalAmount = roundMoney(perUnitPaid * returnQty);
 
-    const taxRatio =
-      record.grandTotal > 0
-        ? record.subtotal / record.grandTotal
-        : 1;
+    const taxRatio = record.grandTotal > 0 ? record.subtotal / record.grandTotal : 1;
     const subtotal = roundMoney(totalAmount * taxRatio);
     const taxAmount = roundMoney(totalAmount - subtotal);
 
@@ -2732,12 +2354,8 @@ function ReturnModal({
     };
   });
 
-  const subtotalTotal = roundMoney(
-    returnItems.reduce((s, it) => s + it.subtotal, 0)
-  );
-  const taxTotal = roundMoney(
-    returnItems.reduce((s, it) => s + it.taxAmount, 0)
-  );
+  const subtotalTotal = roundMoney(returnItems.reduce((s, it) => s + it.subtotal, 0));
+  const taxTotal = roundMoney(returnItems.reduce((s, it) => s + it.taxAmount, 0));
   const totalReturnAmount = roundMoney(subtotalTotal + taxTotal);
 
   const submit = (): void => {
@@ -2747,6 +2365,10 @@ function ReturnModal({
     }
     const activeItems = returnItems.filter((it) => it.returnQty > 0);
     if (activeItems.length === 0) {
+      setErr(tr.errNoItems);
+      return;
+    }
+    if (totalReturnAmount <= 0) {
       setErr(tr.errNoItems);
       return;
     }
@@ -2901,8 +2523,12 @@ function ReturnModal({
             </label>
             <textarea
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
+              onChange={(e) => {
+                setReason(e.target.value);
+                setErr('');
+              }}
               rows={2}
+              maxLength={255}
               placeholder={tr.returnReasonPh}
               className={rbTextareaCls}
               style={INPUT_STYLE}
@@ -2929,6 +2555,7 @@ function ReturnModal({
               <input
                 type="text"
                 value={notes}
+                maxLength={255}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={tr.returnNotesPh}
                 className={rbInputCls}
@@ -2954,7 +2581,8 @@ function ReturnModal({
           <div className="flex gap-2.5 pt-3" style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}>
             <button
               onClick={submit}
-              className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5"
+              disabled={busy}
+              className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
               style={{
                 background: THEME.warmBrass,
                 color: THEME.warmIvory,
@@ -2966,7 +2594,8 @@ function ReturnModal({
             </button>
             <button
               onClick={onClose}
-              className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all"
+              disabled={busy}
+              className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all disabled:opacity-50"
               style={{
                 background: 'transparent',
                 border: `2px solid ${THEME.mutedOlive}40`,
@@ -3095,23 +2724,25 @@ function ReturnDetailsModal({
               {formatMoney(returnRecord.totalReturnAmount)}
             </span>
           </div>
-          <div
-            className="flex justify-between items-center pt-1.5"
-            style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}
-          >
-            <span className="text-[11px]" style={{ color: THEME.mutedOlive }}>
-              {tr.linkedTransaction}
-            </span>
-            <button
-              type="button"
-              onClick={() => onNavigateToAccounting(returnRecord.linkedTransactionId)}
-              className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold cursor-pointer hover:underline transition"
-              style={{ color: THEME.deepForest }}
+          {returnRecord.linkedTransactionId && (
+            <div
+              className="flex justify-between items-center pt-1.5"
+              style={{ borderTop: `1px solid ${THEME.mutedOlive}30` }}
             >
-              <span dir="ltr">{returnRecord.linkedTransactionId}</span>
-              {RbIcons.external}
-            </button>
-          </div>
+              <span className="text-[11px]" style={{ color: THEME.mutedOlive }}>
+                {tr.linkedTransaction}
+              </span>
+              <button
+                type="button"
+                onClick={() => onNavigateToAccounting(returnRecord.linkedTransactionId)}
+                className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold cursor-pointer hover:underline transition"
+                style={{ color: THEME.deepForest }}
+              >
+                <span dir="ltr">{returnRecord.linkedTransactionId}</span>
+                {RbIcons.external}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="text-[9px] text-center italic" style={{ color: THEME.mutedOlive }}>
@@ -3210,8 +2841,36 @@ function Pagination({
 }
 
 // ============================================================
-// RECORD DETAILS MODAL — ✅ Discount now always shows (line + invoice)
+// RECORD DETAILS MODAL
 // ============================================================
+function ReadOnlyField({
+  label,
+  value,
+  ltr = false,
+  style,
+}: {
+  label: string;
+  value: string;
+  ltr?: boolean;
+  style?: React.CSSProperties;
+}): React.JSX.Element {
+  return (
+    <div>
+      <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        readOnly
+        dir={ltr ? 'ltr' : undefined}
+        className={rbInputCls}
+        style={{ ...INPUT_STYLE, cursor: 'default', ...style }}
+      />
+    </div>
+  );
+}
+
 function RecordDetailsModal({
   record,
   history,
@@ -3245,14 +2904,13 @@ function RecordDetailsModal({
 
   const paymentSupported = supportsPayment(record);
   const canAddPayment =
-    paymentSupported &&
-    record.paymentStatus !== 'Paid' &&
-    record.balanceDue > 0;
+    paymentSupported && record.paymentStatus !== 'Paid' && record.balanceDue > 0;
 
   const discountPct =
     record.subtotal > 0 && record.discountTotal > 0
       ? roundMoney((record.discountTotal / record.subtotal) * 100)
       : 0;
+  const hasDiscount = !!record.discountTotal && record.discountTotal > 0;
 
   return (
     <Modal
@@ -3295,194 +2953,45 @@ function RecordDetailsModal({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-xl p-3 space-y-2" style={{ background: SOFT_BG }}>
             <SectionTitle>{tr.billTo}</SectionTitle>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.colCustomer}
-              </label>
-              <input
-                type="text"
-                value={record.customerSnapshot.name}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
+            <ReadOnlyField label={tr.colCustomer} value={record.customerSnapshot.name} />
             {record.customerSnapshot.company && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.companyLabel}
-                </label>
-                <input
-                  type="text"
-                  value={record.customerSnapshot.company}
-                  readOnly
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
+              <ReadOnlyField label={tr.companyLabel} value={record.customerSnapshot.company} />
             )}
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.phoneLabel}
-              </label>
-              <input
-                type="text"
-                value={record.customerSnapshot.phone}
-                readOnly
-                dir="ltr"
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.addressLabel}
-              </label>
-              <input
-                type="text"
-                value={`${record.customerSnapshot.address}${
-                  record.customerSnapshot.address && record.customerSnapshot.city ? ', ' : ''
-                }${record.customerSnapshot.city}`}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
+            <ReadOnlyField label={tr.phoneLabel} value={record.customerSnapshot.phone} ltr />
+            <ReadOnlyField
+              label={tr.addressLabel}
+              value={`${record.customerSnapshot.address}${
+                record.customerSnapshot.address && record.customerSnapshot.city ? ', ' : ''
+              }${record.customerSnapshot.city}`}
+            />
           </div>
 
           <div className="rounded-xl p-3 space-y-2" style={{ background: SOFT_BG }}>
             <SectionTitle>{tr.document}</SectionTitle>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.type}
-              </label>
-              <input
-                type="text"
-                value={record.documentType === 'quotation' ? tr.docQuotation : tr.docInvoice}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.colStatus}
-              </label>
-              <input
-                type="text"
-                value={statusLabel(tr, record.status)}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.issue}
-              </label>
-              <input
-                type="text"
-                value={formatDate(record.issueDate)}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
+            <ReadOnlyField
+              label={tr.type}
+              value={record.documentType === 'quotation' ? tr.docQuotation : tr.docInvoice}
+            />
+            <ReadOnlyField label={tr.colStatus} value={statusLabel(tr, record.status)} />
+            <ReadOnlyField label={tr.issue} value={formatDate(record.issueDate)} />
             {record.salesChannel && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.salesChannel}
-                </label>
-                <input
-                  type="text"
-                  value={record.salesChannel === 'Online' ? tr.channelOnline : tr.channelOffline}
-                  readOnly
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
-            )}
-
-            {record.dueDate && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.dueDate}
-                </label>
-                <input
-                  type="text"
-                  value={formatDate(record.dueDate)}
-                  readOnly
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
-            )}
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.createdByLabel}
-              </label>
-              <input
-                type="text"
-                value={record.createdBy}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
+              <ReadOnlyField
+                label={tr.salesChannel}
+                value={record.salesChannel === 'Online' ? tr.channelOnline : tr.channelOffline}
               />
-            </div>
-
+            )}
+            {record.dueDate && (
+              <ReadOnlyField label={tr.dueDate} value={formatDate(record.dueDate)} />
+            )}
+            <ReadOnlyField label={tr.createdByLabel} value={record.createdBy} />
             {record.updatedAt && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.lastUpdated}
-                </label>
-                <input
-                  type="text"
-                  value={formatDateTime(record.updatedAt)}
-                  readOnly
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
+              <ReadOnlyField label={tr.lastUpdated} value={formatDateTime(record.updatedAt)} />
             )}
-
             {record.vatNumber && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.vatNumberLabel}
-                </label>
-                <input
-                  type="text"
-                  value={record.vatNumber}
-                  readOnly
-                  dir="ltr"
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
+              <ReadOnlyField label={tr.vatNumberLabel} value={record.vatNumber} ltr />
             )}
-
             {record.paymentReference && (
-              <div>
-                <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                  {tr.paymentReferenceLabel}
-                </label>
-                <input
-                  type="text"
-                  value={record.paymentReference}
-                  readOnly
-                  className={rbInputCls}
-                  style={{ ...INPUT_STYLE, cursor: 'default' }}
-                />
-              </div>
+              <ReadOnlyField label={tr.paymentReferenceLabel} value={record.paymentReference} />
             )}
           </div>
         </div>
@@ -3490,161 +2999,95 @@ function RecordDetailsModal({
         <div>
           <SectionTitle>{tr.items}</SectionTitle>
           <div className="rounded-xl overflow-hidden" style={{ border: CARD_BORDER }}>
-            <table className="w-full">
-              <thead>
-                <tr style={{ background: SOFT_BG }}>
-                  <Th label={tr.material} />
-                  <Th label={tr.categoryLabel} align="start" w="w-24" />
-                  <Th label={tr.colQty} align="center" w="w-16" />
-                  <Th label={tr.colUnit} align="end" w="w-24" />
-                  <Th label={tr.costPrice} align="end" w="w-24" />
-                  <Th label={tr.colDiscount} align="center" w="w-28" />
-                  <Th label={tr.colTotal} align="end" w="w-28" />
-                </tr>
-              </thead>
-              <tbody>
-                {record.lines.map((l) => {
-                  const d = getLineDiscount(record, l);
-                  return (
-                    <tr key={l.id} style={{ borderTop: `1px solid ${THEME.mutedOlive}20` }}>
-                      <td className="px-3 py-1.5 text-[12px] font-semibold" style={{ color: THEME.charcoal }}>
-                        {l.material}
-                      </td>
-                      <td className="px-3 py-1.5 text-[11px]" style={{ color: THEME.mutedOlive }}>
-                        {l.category || '—'}
-                      </td>
-                      <td className="px-3 py-1.5 text-center text-[12px]" style={{ color: THEME.mutedOlive }}>
-                        {l.quantity}
-                      </td>
-                      <td className="px-3 py-1.5 text-end text-[12px]" style={{ color: THEME.mutedOlive }}>
-                        {formatMoney(l.unitPrice)}
-                      </td>
-                      <td className="px-3 py-1.5 text-end text-[11px]" style={{ color: THEME.mutedOlive }}>
-                        {l.costPrice ? formatMoney(l.costPrice) : '—'}
-                      </td>
-                      <td
-                        className="px-3 py-1.5 text-center text-[11px] font-bold"
-                        style={{ color: d.amount > 0 ? '#dc2626' : THEME.mutedOlive }}
-                      >
-                        {d.label}
-                      </td>
-                      <td className="px-3 py-1.5 text-end text-[12px] font-bold" style={{ color: THEME.charcoal }}>
-                        {formatMoney(l.lineTotal)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ background: SOFT_BG }}>
+                    <Th label={tr.material} />
+                    <Th label={tr.categoryLabel} align="start" w="w-24" />
+                    <Th label={tr.colQty} align="center" w="w-16" />
+                    <Th label={tr.colUnit} align="end" w="w-24" />
+                    <Th label={tr.costPrice} align="end" w="w-24" />
+                    <Th label={tr.colDiscount} align="center" w="w-28" />
+                    <Th label={tr.colTotal} align="end" w="w-28" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {record.lines.map((l) => {
+                    const d = getLineDiscount(record, l);
+                    return (
+                      <tr key={l.id} style={{ borderTop: `1px solid ${THEME.mutedOlive}20` }}>
+                        <td className="px-3 py-1.5 text-[12px] font-semibold" style={{ color: THEME.charcoal }}>
+                          {l.material}
+                        </td>
+                        <td className="px-3 py-1.5 text-[11px]" style={{ color: THEME.mutedOlive }}>
+                          {l.category || '—'}
+                        </td>
+                        <td className="px-3 py-1.5 text-center text-[12px]" style={{ color: THEME.mutedOlive }}>
+                          {l.quantity}
+                        </td>
+                        <td className="px-3 py-1.5 text-end text-[12px]" style={{ color: THEME.mutedOlive }}>
+                          {formatMoney(l.unitPrice)}
+                        </td>
+                        <td className="px-3 py-1.5 text-end text-[11px]" style={{ color: THEME.mutedOlive }}>
+                          {l.costPrice ? formatMoney(l.costPrice) : '—'}
+                        </td>
+                        <td
+                          className="px-3 py-1.5 text-center text-[11px] font-bold"
+                          style={{ color: d.amount > 0 ? '#dc2626' : THEME.mutedOlive }}
+                        >
+                          {d.label}
+                        </td>
+                        <td className="px-3 py-1.5 text-end text-[12px] font-bold" style={{ color: THEME.charcoal }}>
+                          {formatMoney(l.lineTotal)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
         <div className="rounded-xl p-3 space-y-2" style={{ background: SOFT_BG }}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.subtotal}
-              </label>
-              <input
-                type="text"
-                value={formatMoney(record.subtotal)}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
-            {/* ✅ Discount — ALWAYS shows (percentage + amount) */}
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.discount}
-                {discountPct > 0 && ` (${discountPct}%)`}
-              </label>
-              <input
-                type="text"
-                value={
-                  record.discountTotal && record.discountTotal > 0
-                    ? `-${formatMoney(record.discountTotal)}`
-                    : formatMoney(0)
-                }
-                readOnly
-                className={rbInputCls}
-                style={{
-                  ...INPUT_STYLE,
-                  cursor: 'default',
-                  color:
-                    record.discountTotal && record.discountTotal > 0
-                      ? '#dc2626'
-                      : THEME.mutedOlive,
-                  fontWeight:
-                    record.discountTotal && record.discountTotal > 0 ? 700 : 400,
-                }}
-              />
-            </div>
-
-            {/* ✅ VAT — ALWAYS shows */}
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.vat} ({record.vatRate || 0}%)
-              </label>
-              <input
-                type="text"
-                value={formatMoney(record.taxTotal || 0)}
-                readOnly
-                className={rbInputCls}
-                style={{ ...INPUT_STYLE, cursor: 'default' }}
-              />
-            </div>
-
-            <div>
-              <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                {tr.grandTotal}
-              </label>
-              <input
-                type="text"
-                value={formatMoney(record.grandTotal)}
-                readOnly
-                className={rbInputCls}
-                style={{
-                  ...INPUT_STYLE,
-                  cursor: 'default',
-                  fontWeight: 700,
-                  color: THEME.warmBrass,
-                  borderColor: `${THEME.warmBrass}80`,
-                }}
-              />
-            </div>
-
+            <ReadOnlyField label={tr.subtotal} value={formatMoney(record.subtotal)} />
+            <ReadOnlyField
+              label={`${tr.discount}${discountPct > 0 ? ` (${discountPct}%)` : ''}`}
+              value={hasDiscount ? `-${formatMoney(record.discountTotal)}` : formatMoney(0)}
+              style={{
+                color: hasDiscount ? '#dc2626' : THEME.mutedOlive,
+                fontWeight: hasDiscount ? 700 : 400,
+              }}
+            />
+            <ReadOnlyField
+              label={`${tr.vat} (${record.vatRate || 0}%)`}
+              value={formatMoney(record.taxTotal || 0)}
+            />
+            <ReadOnlyField
+              label={tr.grandTotal}
+              value={formatMoney(record.grandTotal)}
+              style={{
+                fontWeight: 700,
+                color: THEME.warmBrass,
+                borderColor: `${THEME.warmBrass}80`,
+              }}
+            />
             {paymentSupported && (
               <>
-                <div>
-                  <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                    {tr.payment}
-                  </label>
-                  <input
-                    type="text"
-                    value={`${payLabel(tr, record.paymentStatus)}${
-                      record.paymentMethod ? ` · ${methodLabel(tr, record.paymentMethod)}` : ''
-                    }`}
-                    readOnly
-                    className={rbInputCls}
-                    style={{ ...INPUT_STYLE, cursor: 'default' }}
-                  />
-                </div>
-
+                <ReadOnlyField
+                  label={tr.payment}
+                  value={`${payLabel(tr, record.paymentStatus)}${
+                    record.paymentMethod ? ` · ${methodLabel(tr, record.paymentMethod)}` : ''
+                  }`}
+                />
                 {(record.paymentAmount > 0 || record.balanceDue > 0) && (
-                  <div>
-                    <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
-                      {tr.balanceDue}
-                    </label>
-                    <input
-                      type="text"
-                      value={formatMoney(record.balanceDue)}
-                      readOnly
-                      className={rbInputCls}
-                      style={{ ...INPUT_STYLE, cursor: 'default', fontWeight: 700 }}
-                    />
-                  </div>
+                  <ReadOnlyField
+                    label={tr.balanceDue}
+                    value={formatMoney(record.balanceDue)}
+                    style={{ fontWeight: 700 }}
+                  />
                 )}
               </>
             )}
@@ -3808,8 +3251,11 @@ export default function RecordsSection(): React.JSX.Element {
   const navigate = useNavigate();
 
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
-  const [documents, setDocuments] = useState<DocumentRecord[]>(() => loadDocuments());
-  const [history, setHistory] = useState<StatusHistory[]>(() => loadHistory());
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [history, setHistory] = useState<StatusHistory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
 
   const [activeTab, setActiveTab] = useState<TabId>('Quotation');
   const [successMsg, setSuccessMsg] = useState('');
@@ -3837,67 +3283,6 @@ export default function RecordsSection(): React.JSX.Element {
   const tr: RbTranslations = rbT[language];
   const isRTL = isRTLLang(language);
 
-  const refresh = (): void => {
-    setDocuments(loadDocuments());
-    setHistory(loadHistory());
-  };
-
-  useEffect(() => {
-    try {
-      const handoff = localStorage.getItem(HANDOFF_VIEW_INVOICE_KEY);
-      if (handoff) {
-        localStorage.removeItem(HANDOFF_VIEW_INVOICE_KEY);
-        const docs = loadDocuments();
-        const found = docs.find((d) => d.id === handoff);
-        if (found) {
-          setViewRecord(found);
-          setActiveTab(getCategory(found));
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    const onStorage = (e: StorageEvent): void => {
-      if (
-        e.key === DOCUMENTS_KEY ||
-        e.key === HISTORY_KEY ||
-        e.key === 'zakhira_user'
-      ) {
-        refresh();
-      }
-    };
-    const onFocus = (): void => refresh();
-    const onVisible = (): void => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    const onCustom = (): void => refresh();
-
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('zakhira:sales-updated', onCustom as EventListener);
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('zakhira:sales-updated', onCustom as EventListener);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, []);
-
-  useEffect(() => {
-    const sync = (): void => setLanguage(getStoredLanguage());
-    window.addEventListener('storage', sync);
-    window.addEventListener('focus', sync);
-    return () => {
-      window.removeEventListener('storage', sync);
-      window.removeEventListener('focus', sync);
-    };
-  }, []);
-
   const showSuccess = (msg: string): void => {
     setSuccessMsg(msg);
     setErrorMsg('');
@@ -3909,6 +3294,98 @@ export default function RecordsSection(): React.JSX.Element {
     setTimeout(() => setErrorMsg(''), 3500);
   };
 
+  // ------------------------------------------------------------
+  // DATA LOADING (Supabase via recordsService)
+  // ------------------------------------------------------------
+  const refresh = useCallback(async (): Promise<DocumentRecord[]> => {
+    try {
+      const rows = await recordsService.getDocuments();
+      const mapped = rows.map(mapDoc);
+      setDocuments(mapped);
+      setHistory(mapHistory(rows));
+      return mapped;
+    } catch (e) {
+      console.error('Records load error:', e);
+      const msg = rbT[getStoredLanguage()].toastLoadErr;
+      setErrorMsg(msg);
+      setTimeout(() => setErrorMsg(''), 3500);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // first load + handoff from accounting ("view invoice")
+  useEffect(() => {
+    void (async () => {
+      const docs = await refresh();
+      try {
+        const handoff = localStorage.getItem(HANDOFF_VIEW_INVOICE_KEY);
+        if (handoff) {
+          localStorage.removeItem(HANDOFF_VIEW_INVOICE_KEY);
+          const found = docs.find((d) => d.id === handoff);
+          if (found) {
+            setViewRecord(found);
+            setActiveTab(getCategory(found));
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [refresh]);
+
+  // company info for printing (businesses table)
+  useEffect(() => {
+    void (async () => {
+      try {
+        setCompany(await recordsService.getCompanyInfo());
+      } catch {
+        /* keep default */
+      }
+    })();
+  }, []);
+
+  // refresh when the user returns to the tab / other modules change sales data
+  useEffect(() => {
+    const onFocus = (): void => {
+      void refresh();
+    };
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    const onCustom = (): void => {
+      void refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('zakhira:sales-updated', onCustom);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('zakhira:sales-updated', onCustom);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
+
+  // language sync
+  useEffect(() => {
+    const sync = (): void => setLanguage(getStoredLanguage());
+    window.addEventListener('storage', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
+
+  // keep the details modal in sync with fresh data
+  const liveViewRecord = viewRecord
+    ? documents.find((d) => d.id === viewRecord.id) || viewRecord
+    : null;
+
+  // ------------------------------------------------------------
+  // FILTER / SORT / PAGINATE
+  // ------------------------------------------------------------
   const baseFiltered = useMemo(() => {
     let list = [...documents];
     if (search.trim()) {
@@ -3994,10 +3471,7 @@ export default function RecordsSection(): React.JSX.Element {
 
   const totalPages = Math.max(1, Math.ceil(currentList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const paginated = currentList.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE
-  );
+  const paginated = currentList.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const handleTabChange = (tab: TabId): void => {
     setActiveTab(tab);
@@ -4028,178 +3502,87 @@ export default function RecordsSection(): React.JSX.Element {
 
   const hasActiveFilters = search.trim() !== '' || dateFrom !== '' || dateTo !== '';
 
-  const changeStatus = (
+  // ------------------------------------------------------------
+  // ACTIONS (all go through recordsService)
+  // ------------------------------------------------------------
+  const afterWrite = async (): Promise<DocumentRecord[]> => {
+    const docs = await refresh();
+    window.dispatchEvent(new Event('zakhira:sales-updated'));
+    return docs;
+  };
+
+  const changeStatus = async (
     record: DocumentRecord,
     newStatus: WorkflowStatus,
     reason: string
-  ): void => {
-    const list = loadDocuments();
-    const updated = list.map((d) =>
-      d.id === record.id
-        ? { ...d, status: newStatus, updatedAt: new Date().toISOString() }
-        : d
-    );
-    if (!saveDocuments(updated)) {
+  ): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await recordsService.updateStatus(
+        record.id,
+        record.status,
+        newStatus,
+        reason.trim() || getStatusLabel(newStatus)
+      );
+      await afterWrite();
+      if (newStatus === 'Approved') showSuccess(tr.toastApproved(record.orderNumber));
+      else if (newStatus === 'Rejected') showSuccess(tr.toastRejected(record.orderNumber));
+      else showSuccess(tr.toastPending(record.orderNumber));
+    } catch (e) {
+      console.error(e);
       showError(tr.toastStorageErr);
-      return;
+    } finally {
+      setBusy(false);
     }
-
-    if (newStatus === 'Rejected') {
-      deleteAccountingEntry(record.id);
-    }
-
-    const user = getCurrentUser();
-    const entry: StatusHistory = {
-      id: uid('sh'),
-      documentId: record.id,
-      oldStatus: record.status,
-      newStatus,
-      reason: reason.trim() || getStatusLabel(newStatus),
-      changedBy: user.name,
-      changedAt: new Date().toISOString(),
-    };
-    saveHistory([...loadHistory(), entry]);
-
-    refresh();
-    window.dispatchEvent(new Event('zakhira:sales-updated'));
-
-    if (newStatus === 'Approved') showSuccess(tr.toastApproved(record.orderNumber));
-    else if (newStatus === 'Rejected') showSuccess(tr.toastRejected(record.orderNumber));
-    else showSuccess(tr.toastPending(record.orderNumber));
   };
 
-  const handleApproveWithPayment = (
+  const handleApproveWithPayment = async (
     record: DocumentRecord,
     data: { amount: number; method: PaymentMethod; note?: string }
-  ): void => {
-    const user = getCurrentUser();
-    const list = loadDocuments();
+  ): Promise<void> => {
+    if (busy) return;
 
     const paidBefore = sumPayments(record);
     const remaining = roundMoney(Math.max(0, record.grandTotal - paidBefore));
-
-    // ✅ Safety guard: unpaid records cannot be approved without a minimum payment
     const minRequired = getMinApprovePayment(paidBefore, remaining);
+
     if (!Number.isFinite(data.amount) || data.amount < minRequired) {
       showError(tr.errMinPayment);
       return;
     }
-
     const amt = roundMoney(Math.max(0, Math.min(remaining, data.amount)));
-    const totalPaid = roundMoney(paidBefore + amt);
-    const newBalance = roundMoney(Math.max(0, record.grandTotal - totalPaid));
-    const newStatus: PaymentStatus =
-      newBalance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partially Paid' : 'Unpaid';
 
-    const newPayment: PaymentRecord | null =
-      amt > 0
-        ? {
-            id: uid('pay'),
-            date: todayISO(),
-            amount: amt,
-            method: data.method,
-            note: data.note,
-            balanceAfter: newBalance,
-            recordedBy: user.name,
-            createdAt: new Date().toISOString(),
-          }
-        : null;
-
-    const updated = list.map((d) =>
-      d.id === record.id
-        ? {
-            ...d,
-            status: 'Approved' as const,
-            paymentStatus: newStatus,
-            paymentAmount: totalPaid,
-            balanceDue: newBalance,
-            paymentMethod: amt > 0 ? d.paymentMethod || data.method : d.paymentMethod,
-            paymentDate: amt > 0 ? todayISO() : d.paymentDate,
-            paymentReference: data.note || d.paymentReference,
-            tenantId: d.tenantId || getTenantId(),
-            updatedAt: new Date().toISOString(),
-            payments: newPayment
-              ? [...(d.payments || []), newPayment]
-              : d.payments || [],
-          }
-        : d
-    );
-
-    if (!saveDocuments(updated)) {
-      showError(tr.toastStorageErr);
-      return;
-    }
-
-    if (record.documentType === 'invoice' && record.status !== 'Approved') {
-      const stockItems = record.lines.map((l) => ({
-        productId: l.productId,
-        productName: l.material,
-        sku: l.sku,
-        delta: -Math.abs(l.quantity),
-      }));
-      const ok = adjustStockAndLog(
-        stockItems,
-        record.orderNumber,
+    setBusy(true);
+    try {
+      await recordsService.approveDocument(
         record.id,
-        'sale',
-        user.name
+        record.status,
+        amt > 0 ? { amount: amt, method: data.method, note: data.note } : undefined
       );
-      if (!ok) showError(tr.toastStockErr);
+      setApproveTarget(null);
+      await afterWrite();
+      showSuccess(tr.toastApproved(record.orderNumber));
+    } catch (e) {
+      console.error(e);
+      showError(tr.toastSaveErr);
+      await refresh();
+    } finally {
+      setBusy(false);
     }
-
-    if (newPayment) {
-      const txn = recordPaymentInAccounting(record, newPayment);
-      if (!txn) showError(tr.toastAccErr);
-    } else {
-      if (!hasEntriesForDoc(record.id)) ensurePaymentEntries(record);
-      if (!hasEntriesForDoc(record.id)) {
-        syncAccountingEntry({
-          type: 'In',
-          amount: remaining,
-          date: record.issueDate,
-          customerName: record.customerSnapshot.name,
-          companyName: record.customerSnapshot.company,
-          invoiceRef: record.orderNumber,
-          status: 'Pending',
-          mode: mapPaymentMode(record.paymentMethod),
-          sourceDocumentId: record.id,
-          sourceModule: 'sales',
-          notes: `Approved Sales ${
-            record.documentType === 'quotation' ? 'Quotation' : 'Invoice'
-          } ${record.orderNumber} (Unpaid)`,
-        });
-      }
-    }
-
-    saveHistory([
-      ...loadHistory(),
-      {
-        id: uid('sh'),
-        documentId: record.id,
-        oldStatus: record.status,
-        newStatus: 'Approved',
-        reason: tr.histApproved,
-        changedBy: user.name,
-        changedAt: new Date().toISOString(),
-      },
-    ]);
-
-    refresh();
-    window.dispatchEvent(new Event('zakhira:sales-updated'));
-    setApproveTarget(null);
-    showSuccess(tr.toastApproved(record.orderNumber));
   };
 
   const handleReject = (record: DocumentRecord, reason: string): void => {
-    changeStatus(record, 'Rejected', reason || tr.histRejected);
     setRejectTarget(null);
-  };
-  const handlePending = (record: DocumentRecord): void => {
-    changeStatus(record, 'Pending', tr.histPending);
-    setPendingTarget(null);
+    void changeStatus(record, 'Rejected', reason || tr.histRejected);
   };
 
-  const handleReturn = (
+  const handlePending = (record: DocumentRecord): void => {
+    setPendingTarget(null);
+    void changeStatus(record, 'Pending', tr.histPending);
+  };
+
+  const handleReturn = async (
     record: DocumentRecord,
     data: {
       reason: string;
@@ -4210,161 +3593,58 @@ export default function RecordsSection(): React.JSX.Element {
       taxTotal: number;
       totalReturnAmount: number;
     }
-  ): void => {
-    const user = getCurrentUser();
-    const docs = loadDocuments();
-    const returnNumber = genReturnNumber(docs);
-    const returnId = uid('ret');
-
-    const allTxns = loadAccountingList();
-    const originalTxn = allTxns
-      .filter(
-        (x) =>
-          x.type === 'In' &&
-          (x.sourceDocumentId === record.id || x.linkedInvoiceId === record.id)
-      )
-      .pop();
-    const originalTxnNo = originalTxn?.transactionNo || '';
-
-    const returnTxn = createPartialReturnEntry({
-      amount: data.totalReturnAmount,
-      date: data.date,
-      customerName: record.customerSnapshot.name,
-      companyName: record.customerSnapshot.company,
-      linkedInvoiceRef: record.orderNumber,
-      linkedInvoiceId: record.id,
-      linkedInvoiceTxnId: originalTxnNo,
-      returnNumber,
-      notes: `Return ${returnNumber}: ${data.reason}${
-        data.notes ? ` — ${data.notes}` : ''
-      }`,
-    });
-
-    if (!returnTxn) {
-      showError(tr.toastAccErr);
-      return;
-    }
-
-    markOriginalInvoiceReturn(record.id, returnTxn.transactionNo);
-
-    const returnRecord: ReturnRecord = {
-      returnId,
-      returnNumber,
-      date: data.date,
-      reason: data.reason,
-      notes: data.notes || undefined,
-      items: data.items,
-      subtotal: data.subtotal,
-      taxTotal: data.taxTotal,
-      totalReturnAmount: data.totalReturnAmount,
-      linkedTransactionId: returnTxn.transactionNo,
-      createdBy: user.name,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedDocs = docs.map((d) =>
-      d.id === record.id
-        ? {
-            ...d,
-            returnRecords: [...(d.returnRecords || []), returnRecord],
-            updatedAt: new Date().toISOString(),
-          }
-        : d
-    );
-
-    if (!saveDocuments(updatedDocs)) {
+  ): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const ret = await recordsService.addReturn({
+        documentId: record.id,
+        documentRef: record.orderNumber,
+        documentStatus: record.status,
+        customerName: record.customerSnapshot.name,
+        customerCompany: record.customerSnapshot.company,
+        date: data.date,
+        reason: data.reason,
+        notes: data.notes || undefined,
+        items: data.items.map((it) => ({
+          ...it,
+          productId: record.lines.find((l) => l.id === it.lineId)?.productId || '',
+        })),
+        subtotal: data.subtotal,
+        taxTotal: data.taxTotal,
+        totalReturnAmount: data.totalReturnAmount,
+      });
+      setReturnTarget(null);
+      await afterWrite();
+      showSuccess(tr.toastReturnCreated(ret.return_number));
+    } catch (e) {
+      console.error(e);
       showError(tr.toastSaveErr);
-      return;
+      await refresh();
+    } finally {
+      setBusy(false);
     }
-
-    const stockItems = data.items.map((it) => {
-      const line = record.lines.find((l) => l.id === it.lineId);
-      return {
-        productId: line?.productId || '',
-        productName: it.productName,
-        sku: line?.sku,
-        delta: Math.abs(it.returnQty),
-      };
-    });
-    const ok = adjustStockAndLog(
-      stockItems,
-      returnNumber,
-      record.id,
-      'return',
-      user.name
-    );
-    if (!ok) showError(tr.toastStockErr);
-
-    const entry: StatusHistory = {
-      id: uid('sh'),
-      documentId: record.id,
-      oldStatus: record.status,
-      newStatus: record.status,
-      reason: tr.histReturn(data.items.length, returnNumber),
-      changedBy: user.name,
-      changedAt: new Date().toISOString(),
-    };
-    saveHistory([...loadHistory(), entry]);
-
-    refresh();
-    window.dispatchEvent(new Event('zakhira:sales-updated'));
-    setReturnTarget(null);
-    showSuccess(tr.toastReturnCreated(returnNumber));
   };
 
-  const handleAddPayment = (
+  const handleAddPayment = async (
     record: DocumentRecord,
     data: { amount: number; method: PaymentMethod; note?: string }
-  ): void => {
-    const user = getCurrentUser();
-    const docs = loadDocuments();
-
-    const existingPayments = record.payments || [];
-    const totalPaid = existingPayments.reduce((s, p) => s + p.amount, 0);
-    const newTotalPaid = roundMoney(totalPaid + data.amount);
-    const newBalance = roundMoney(Math.max(0, record.grandTotal - newTotalPaid));
-    const newStatus: PaymentStatus =
-      newBalance <= 0 ? 'Paid' : newTotalPaid > 0 ? 'Partially Paid' : 'Unpaid';
-
-    const newPayment: PaymentRecord = {
-      id: uid('pay'),
-      date: todayISO(),
-      amount: data.amount,
-      method: data.method,
-      note: data.note,
-      balanceAfter: newBalance,
-      recordedBy: user.name,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedDocs = docs.map((d) =>
-      d.id === record.id
-        ? {
-            ...d,
-            payments: [...existingPayments, newPayment],
-            paymentStatus: newStatus,
-            paymentAmount: newTotalPaid,
-            balanceDue: newBalance,
-            paymentMethod: d.paymentMethod || data.method,
-            paymentDate: todayISO(),
-            updatedAt: new Date().toISOString(),
-          }
-        : d
-    );
-
-    if (!saveDocuments(updatedDocs)) {
+  ): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await recordsService.addPayment(record.id, data);
+      setPaymentTarget(null);
+      const docs = await afterWrite();
+      setViewRecord(docs.find((d) => d.id === record.id) || null);
+      showSuccess(tr.toastPaymentAdded);
+    } catch (e) {
+      console.error(e);
       showError(tr.toastSaveErr);
-      return;
+      await refresh();
+    } finally {
+      setBusy(false);
     }
-
-    const txn = recordPaymentInAccounting(record, newPayment);
-    if (!txn) showError(tr.toastAccErr);
-
-    refresh();
-    window.dispatchEvent(new Event('zakhira:sales-updated'));
-    setPaymentTarget(null);
-    setViewRecord(updatedDocs.find((d) => d.id === record.id) || null);
-    if (txn) showSuccess(tr.toastPaymentAdded);
   };
 
   const navigateToAccountingWithTxn = (txnId: string): void => {
@@ -4411,9 +3691,7 @@ export default function RecordsSection(): React.JSX.Element {
   };
 
   const handlePrint = (record: DocumentRecord, format: PrintFormat): void => {
-    const company = getCompanyInfo();
-    const docLabel =
-      record.documentType === 'quotation' ? tr.docQuotation : tr.docInvoice;
+    const docLabel = record.documentType === 'quotation' ? tr.docQuotation : tr.docInvoice;
     const dir = isRTL ? 'rtl' : 'ltr';
     const fmt = PRINT_FORMATS[format];
     const esc = (s: string | number | undefined | null): string =>
@@ -4448,11 +3726,7 @@ export default function RecordsSection(): React.JSX.Element {
             <td>${esc(l.material)}</td>
             <td class="r">${l.quantity}</td>
             <td class="r">${formatMoney(l.unitPrice)}</td>
-            ${
-              fmt.fullColumns
-                ? `<td class="r">${getLineDiscount(record, l).label}</td>`
-                : ''
-            }
+            ${fmt.fullColumns ? `<td class="r">${getLineDiscount(record, l).label}</td>` : ''}
             <td class="r">${formatMoney(l.lineTotal)}</td>
           </tr>`
       )
@@ -4763,7 +4037,13 @@ ${compactCSS}
           </h2>
         </div>
 
-        {paginated.length > 0 ? (
+        {loading ? (
+          <div className="py-12 text-center">
+            <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
+              {tr.loading}
+            </p>
+          </div>
+        ) : paginated.length > 0 ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px]">
@@ -4967,13 +4247,13 @@ ${compactCSS}
         )}
       </div>
 
-      {viewRecord && (
+      {liveViewRecord && (
         <RecordDetailsModal
-          record={viewRecord}
+          record={liveViewRecord}
           history={history}
           tr={tr}
           onClose={() => setViewRecord(null)}
-          onOpenReturn={(ret) => setViewReturn({ record: viewRecord, returnRecord: ret })}
+          onOpenReturn={(ret) => setViewReturn({ record: liveViewRecord, returnRecord: ret })}
           onAddPayment={(rec) => setPaymentTarget(rec)}
         />
       )}
@@ -4990,8 +4270,9 @@ ${compactCSS}
         <ApprovePaymentModal
           record={approveTarget}
           tr={tr}
+          busy={busy}
           onClose={() => setApproveTarget(null)}
-          onConfirm={(data) => handleApproveWithPayment(approveTarget, data)}
+          onConfirm={(data) => void handleApproveWithPayment(approveTarget, data)}
         />
       )}
       {rejectTarget && (
@@ -5020,20 +4301,20 @@ ${compactCSS}
         <ReturnModal
           record={returnTarget}
           tr={tr}
+          busy={busy}
           onClose={() => setReturnTarget(null)}
-          onSubmit={(data) => handleReturn(returnTarget, data)}
+          onSubmit={(data) => void handleReturn(returnTarget, data)}
         />
       )}
-
       {paymentTarget && (
         <AddPaymentModal
           record={paymentTarget}
           tr={tr}
+          busy={busy}
           onClose={() => setPaymentTarget(null)}
-          onSave={(data) => handleAddPayment(paymentTarget, data)}
+          onSave={(data) => void handleAddPayment(paymentTarget, data)}
         />
       )}
-
       {printTarget && (
         <PrintFormatPickerModal
           record={printTarget}

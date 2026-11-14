@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-
+import { productService, Product as DBProduct } from '@renderer/services/productService';
+import { recordsService, RecordsDocument } from '@renderer/services/recordsService';
+/* eslint-disable react-hooks/set-state-in-effect */
 // ============================================================
 // 🌍 LANGUAGE
 // ============================================================
@@ -103,62 +105,6 @@ const CARD_STYLE: React.CSSProperties = {
 const SHADOW = '0 4px 12px rgba(37,42,40,0.15)';
 
 // ============================================================
-// 🔑 STORAGE
-// ============================================================
-const PRODUCTS_KEY = 'zakhira_inventory_products';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-
-const readList = <T,>(key: string): T[] => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-// ============================================================
-// TYPES
-// ============================================================
-type Product = {
-  id: string;
-  name?: string;
-  sku?: string;
-  active?: boolean;
-  category?: string;
-  price?: number;
-  stock?: number;
-  quantity?: number;
-  onHand?: number;
-  reorderLevel?: number;
-  reorderThreshold?: number;
-  cost?: number;
-  purchasePrice?: number;
-  unitCost?: number;
-};
-
-type SalesDocLine = {
-  id: string;
-  productId?: string;
-  sku?: string;
-  material?: string;
-  category?: string;
-  quantity?: number;
-  unitPrice?: number;
-  price?: number;
-  lineTotal?: number;
-};
-
-type SalesDocument = {
-  id: string;
-  documentType: 'quotation' | 'invoice';
-  status: 'Pending' | 'Approved' | 'Rejected';
-  lines?: SalesDocLine[];
-};
-
-// ============================================================
 // HELPERS
 // ============================================================
 const roundMoney = (n: number): number =>
@@ -174,20 +120,17 @@ const fmt = (n: number): string => {
 
 const norm = (s?: string): string => (s || '').trim().toLowerCase();
 
-const getQty = (p: Product): number =>
-  Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
+const getQty = (p: DBProduct): number => Number(p.stock ?? 0);
 
-const getPrice = (p: Product): number => Number(p.price ?? 0);
-
-const getCost = (p: Product): number => {
-  const explicit = Number(p.unitCost ?? p.cost ?? p.purchasePrice ?? 0);
+const getCost = (p: DBProduct): number => {
+  const explicit = Number(p.cost_price ?? 0);
   if (explicit > 0) return explicit;
-  const price = getPrice(p);
+  const price = Number(p.price ?? 0);
   return price > 0 ? price * 0.6 : 0;
 };
 
-const getThreshold = (p: Product): number =>
-  Number(p.reorderThreshold ?? p.reorderLevel ?? 5);
+const getThreshold = (p: DBProduct): number =>
+  Number(p.low_stock_level ?? 5);
 
 // ============================================================
 // 🖼️ ICONS
@@ -297,43 +240,50 @@ export default function InventoryStats(): React.JSX.Element {
   const tr = T[language] as StatsT;
   const isRTL = isRTLLang(language);
 
-  const [products, setProducts] = useState<Product[]>(() =>
-    readList<Product>(PRODUCTS_KEY)
-  );
-  const [documents, setDocuments] = useState<SalesDocument[]>(() =>
-    readList<SalesDocument>(DOCUMENTS_KEY)
-  );
+  const [products, setProducts] = useState<DBProduct[]>([]);
+  const [documents, setDocuments] = useState<RecordsDocument[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // Sync language changes
   useEffect(() => {
-    const reload = (): void => {
-      setProducts(readList<Product>(PRODUCTS_KEY));
-      setDocuments(readList<SalesDocument>(DOCUMENTS_KEY));
-    };
-    const syncLang = (): void => setLanguage(getStoredLanguage());
-
-    window.addEventListener('focus', reload);
-    window.addEventListener('storage', reload);
+    const syncLang = () => setLanguage(getStoredLanguage());
     window.addEventListener('storage', syncLang);
     window.addEventListener('focus', syncLang);
-    window.addEventListener(
-      'zakhira:inventory-updated',
-      reload as EventListener
-    );
-    window.addEventListener('zakhira:sales-updated', reload as EventListener);
-
     return () => {
-      window.removeEventListener('focus', reload);
-      window.removeEventListener('storage', reload);
       window.removeEventListener('storage', syncLang);
       window.removeEventListener('focus', syncLang);
-      window.removeEventListener(
-        'zakhira:inventory-updated',
-        reload as EventListener
-      );
-      window.removeEventListener(
-        'zakhira:sales-updated',
-        reload as EventListener
-      );
+    };
+  }, []);
+
+  // Fetch data from Supabase
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [productsData, docsData] = await Promise.all([
+        productService.getProducts(),
+        recordsService.getDocuments(),
+      ]);
+      setProducts(productsData);
+      setDocuments(docsData);
+    } catch (err: any) {
+      console.error('Failed to load inventory stats:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Refresh when inventory or sales change
+  useEffect(() => {
+    const reload = () => fetchData();
+    window.addEventListener('zakhira:inventory-updated', reload);
+    window.addEventListener('zakhira:sales-updated', reload);
+    return () => {
+      window.removeEventListener('zakhira:inventory-updated', reload);
+      window.removeEventListener('zakhira:sales-updated', reload);
     };
   }, []);
 
@@ -351,10 +301,11 @@ export default function InventoryStats(): React.JSX.Element {
       return q > 0 && c > 0 ? s + q * c : s;
     }, 0);
 
+    // Categories ka data products table se aata hai (category_id ke through)
+    // Lekin filhal hum unique category_ids count kar rahe hain
     const categorySet = new Set<string>();
     active.forEach((p) => {
-      const cat = (p.category || '').trim();
-      if (cat && cat !== 'Uncategorized') categorySet.add(cat);
+      if (p.category_id) categorySet.add(p.category_id);
     });
     const totalCategories = categorySet.size;
 
@@ -370,29 +321,29 @@ export default function InventoryStats(): React.JSX.Element {
   // ==========================================================
   const topSelling = useMemo(() => {
     const validInvoices = documents.filter(
-      (d) => d.documentType === 'invoice' && d.status === 'Approved'
+      (d) => d.document_type === 'invoice' && d.status === 'Approved'
     );
 
-    const byId = new Map<string, Product>();
-    const bySku = new Map<string, Product>();
-    const byName = new Map<string, Product>();
+    const byId = new Map<string, DBProduct>();
+    const bySku = new Map<string, DBProduct>();
+    const byName = new Map<string, DBProduct>();
     products.forEach((p) => {
       if (p.id) byId.set(String(p.id), p);
       if (p.sku) bySku.set(norm(p.sku), p);
       if (p.name) byName.set(norm(p.name), p);
     });
 
-    const findProduct = (l: SalesDocLine): Product | undefined =>
-      (l.productId ? byId.get(String(l.productId)) : undefined) ||
-      (l.sku ? bySku.get(norm(l.sku)) : undefined) ||
-      (l.material ? byName.get(norm(l.material)) : undefined);
+    const findProduct = (line: any): DBProduct | undefined =>
+      (line.product_id ? byId.get(String(line.product_id)) : undefined) ||
+      (line.sku ? bySku.get(norm(line.sku)) : undefined) ||
+      (line.material ? byName.get(norm(line.material)) : undefined);
 
     const productMap = new Map<string, number>();
     for (const d of validInvoices) {
-      for (const l of d.lines || []) {
-        const prod = findProduct(l);
-        const name = l.material || prod?.name || 'Unknown';
-        const qty = Number(l.quantity || 0);
+      for (const line of d.lines || []) {
+        const prod = findProduct(line);
+        const name = line.material || prod?.name || 'Unknown';
+        const qty = Number(line.quantity || 0);
         productMap.set(name, (productMap.get(name) || 0) + qty);
       }
     }
@@ -420,6 +371,10 @@ export default function InventoryStats(): React.JSX.Element {
 
     return { lowStock, outOfStock };
   }, [products]);
+
+  if (loading) {
+    return <div className="p-4 text-center text-gray-500">Loading inventory stats...</div>;
+  }
 
   return (
     <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-3">
@@ -534,9 +489,6 @@ export default function InventoryStats(): React.JSX.Element {
           </button>
         </div>
       </div>
-
-   
-   
     </div>
   );
 }

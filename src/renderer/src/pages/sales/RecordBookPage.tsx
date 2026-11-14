@@ -1,65 +1,22 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
-// ✅ Import independent charts — NO PROPS PASSED
+import { useEffect, useState } from 'react';
 import SalesCharts from './SalesCharts';
-// ✅ Import the independent sibling — NO PROPS PASSED
 import RecordsSection from './RecordsSection';
-
-// ============================================================
-// THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
+import { recordBookStatsService } from '@renderer/services/recordBookStatsService';
+import { THEME } from '@renderer/theme/theme';
 
 // ============================================================
 // TYPES
 // ============================================================
 type Language = 'en' | 'ar' | 'ur' | 'hi';
 
-type DocLine = {
-  material?: string;
-  quantity?: number;
-  lineTotal?: number;
-};
-
-type DocumentRecord = {
-  id: string;
-  documentType: 'quotation' | 'invoice';
-  status: 'Pending' | 'Approved' | 'Rejected';
-  paymentStatus: 'Unpaid' | 'Partially Paid' | 'Paid';
-  grandTotal: number;
-  paymentAmount: number;
-  subtotal?: number;
-  taxTotal?: number;
-  issueDate: string;
-  createdAt: string;
-  salesChannel?: 'Online' | 'Offline' | string;
-  lines?: DocLine[];
-};
-
 // ============================================================
 // STORAGE HELPERS
 // ============================================================
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
-
-const loadDocuments = (): DocumentRecord[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
 const getStoredLanguage = (): Language => {
   try {
     const u = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
@@ -72,7 +29,6 @@ const getStoredLanguage = (): Language => {
 
 const isRTLLang = (l: Language): boolean => l === 'ar' || l === 'ur';
 
-// ⚠️ NO "SAR" prefix — plain number only
 const formatMoney = (n: number): string => {
   const abs = Math.abs(n);
   return `${n < 0 ? '-' : ''}${abs.toLocaleString('en-US', {
@@ -82,7 +38,7 @@ const formatMoney = (n: number): string => {
 };
 
 // ============================================================
-// TRANSLATIONS (only what page needs: title + stats)
+// TRANSLATIONS
 // ============================================================
 const t = {
   en: {
@@ -138,7 +94,7 @@ const t = {
 type TrType = { [K in keyof (typeof t)['en']]: string };
 
 // ============================================================
-// ICONS — only for the 4 stats
+// ICONS
 // ============================================================
 const svgBase = {
   viewBox: '0 0 24 24',
@@ -243,9 +199,13 @@ function StatCard({
 // MAIN COMPONENT
 // ============================================================
 export default function RecordBookPage(): React.JSX.Element {
-  const [documents, setDocuments] = useState<DocumentRecord[]>(() =>
-    loadDocuments()
-  );
+  const [stats, setStats] = useState({
+    totalSales: 0,
+    receivedAmount: 0,
+    pendingAmount: 0,
+    totalInvoices: 0,
+  });
+  const [loading, setLoading] = useState(true);
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
 
   // Sync language changes
@@ -261,53 +221,36 @@ export default function RecordBookPage(): React.JSX.Element {
     };
   }, []);
 
-  // Sync documents when RecordsSection updates them
+  // Fetch stats from Supabase
+  const fetchStats = async () => {
+    try {
+      setLoading(true);
+      const data = await recordBookStatsService.getSalesStats();
+      setStats(data);
+    } catch (err: any) {
+      console.error('Failed to load stats:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const refresh = () => setDocuments(loadDocuments());
-    window.addEventListener('storage', refresh);
-    window.addEventListener('focus', refresh);
+    fetchStats();
+  }, []);
+
+  // Refresh when RecordsSection changes something
+  useEffect(() => {
+    const refresh = () => fetchStats();
     window.addEventListener('zakhira:sales-updated', refresh);
+    window.addEventListener('focus', refresh);
     return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('focus', refresh);
       window.removeEventListener('zakhira:sales-updated', refresh);
+      window.removeEventListener('focus', refresh);
     };
   }, []);
 
   const tr: TrType = t[language];
   const isRTL = isRTLLang(language);
-
-  // ==========================================================
-  // 📊 4 REQUIREMENTS STATS (Section 3.1)
-  // ==========================================================
-  const stats = useMemo(() => {
-    const validInvoices = documents.filter(
-      (d) => d.documentType === 'invoice' && d.status === 'Approved'
-    );
-
-    const totalSales = validInvoices.reduce((s, d) => {
-      const sub = d.subtotal ?? d.grandTotal;
-      return s + sub;
-    }, 0);
-
-    const receivedAmount = validInvoices.reduce((s, d) => {
-      if (d.paymentStatus === 'Paid') return s + d.grandTotal;
-      if (d.paymentStatus === 'Partially Paid')
-        return s + (d.paymentAmount || 0);
-      return s;
-    }, 0);
-
-    const pendingAmount = validInvoices.reduce((s, d) => {
-      if (d.paymentStatus === 'Partially Paid') {
-        return s + Math.max(0, d.grandTotal - (d.paymentAmount || 0));
-      }
-      return s;
-    }, 0);
-
-    const totalInvoices = validInvoices.length;
-
-    return { totalSales, receivedAmount, pendingAmount, totalInvoices };
-  }, [documents]);
 
   return (
     <div
@@ -326,43 +269,42 @@ export default function RecordBookPage(): React.JSX.Element {
         </p>
       </div>
 
-      {/* 4 STAT CARDS — Requirements Section 3.1 */}
+      {/* 4 STAT CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard
           label={tr.totalSales}
-          value={formatMoney(stats.totalSales)}
+          value={loading ? '...' : formatMoney(stats.totalSales)}
           icon={Icons.trendingUp}
           color={THEME.deepForest}
           hint={tr.netSales}
         />
         <StatCard
           label={tr.receivedAmount}
-          value={formatMoney(stats.receivedAmount)}
+          value={loading ? '...' : formatMoney(stats.receivedAmount)}
           icon={Icons.money}
           color={THEME.deepForest}
           hint={tr.paidInvoices}
         />
         <StatCard
           label={tr.pendingAmount}
-          value={formatMoney(stats.pendingAmount)}
+          value={loading ? '...' : formatMoney(stats.pendingAmount)}
           icon={Icons.clock}
           color={THEME.warmBrass}
           hint={tr.partialInvoices}
         />
         <StatCard
           label={tr.totalInvoices}
-          value={String(stats.totalInvoices)}
+          value={loading ? '...' : String(stats.totalInvoices)}
           icon={Icons.invoice}
           color={THEME.mutedOlive}
           hint={tr.allIssued}
         />
       </div>
 
-    
-
-      {/* RECORD BOOK SECTION (imported) — unchanged */}
+      {/* RECORD BOOK SECTION */}
       <RecordsSection />
-        {/* ✅ 5 CHARTS — now imported, fully independent, zero props */}
+
+      {/* 5 CHARTS */}
       <div className="mb-4">
         <SalesCharts />
       </div>

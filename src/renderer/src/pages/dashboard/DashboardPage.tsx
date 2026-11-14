@@ -3,17 +3,18 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react/no-unescaped-entities */
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { THEME as BASE_THEME } from '@renderer/theme/theme';
+import {
+  dashboardService,
+  type DashboardStats,
+} from '@renderer/services/dashboardservice';
 
 // ============================================================
-// 🎨 FINAL THEME (UNCHANGED)
+// 🎨 THEME — shared brand colors + dashboard-only status colors
 // ============================================================
 const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
+  ...BASE_THEME,
   success: '#15803d',
   successBg: '#dcfce7',
   warning: '#b45309',
@@ -97,6 +98,10 @@ const t = {
     custSaudiBuild: 'Saudi Build Est.',
     custAlFaisal: 'Al-Faisal Trading',
     noData: 'No data yet',
+    loading: 'Loading…',
+    errorTitle: 'Something went wrong',
+    errLoadDashboard: 'Could not load dashboard data',
+    ok: 'OK',
   },
   ar: {
     dashboard: 'لوحة التحكم',
@@ -165,6 +170,10 @@ const t = {
     custSaudiBuild: 'المؤسسة السعودية للبناء',
     custAlFaisal: 'الفصيل للتجارة',
     noData: 'لا توجد بيانات بعد',
+    loading: 'جارٍ التحميل…',
+    errorTitle: 'حدث خطأ ما',
+    errLoadDashboard: 'تعذر تحميل بيانات لوحة التحكم',
+    ok: 'موافق',
   },
   ur: {
     dashboard: 'ڈیش بورڈ',
@@ -233,6 +242,10 @@ const t = {
     custSaudiBuild: 'سعودی بلڈ اسٹیبلشمنٹ',
     custAlFaisal: 'الفصیل ٹریڈنگ',
     noData: 'ابھی کوئی ڈیٹا نہیں',
+    loading: 'لوڈ ہو رہا ہے…',
+    errorTitle: 'کچھ غلط ہو گیا',
+    errLoadDashboard: 'ڈیش بورڈ کا ڈیٹا لوڈ نہیں ہو سکا',
+    ok: 'ٹھیک ہے',
   },
   hi: {
     dashboard: 'डैशबोर्ड',
@@ -301,6 +314,10 @@ const t = {
     custSaudiBuild: 'सऊदी बिल्ड एस्टेब्लिशमेंट',
     custAlFaisal: 'अल-फैसल ट्रेडिंग',
     noData: 'अभी कोई डेटा नहीं',
+    loading: 'लोड हो रहा है…',
+    errorTitle: 'कुछ गलत हो गया',
+    errLoadDashboard: 'डैशबोर्ड डेटा लोड नहीं हो सका',
+    ok: 'ठीक है',
   },
 } as const;
 
@@ -334,6 +351,11 @@ const Icons = {
   plus: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  ),
+  x: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+      <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   ),
   arrowUp: (
@@ -397,78 +419,6 @@ const Icons = {
 // ============================================================
 // TYPES
 // ============================================================
-type Transaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: 'In' | 'Out' | 'Return';
-  amount: number;
-  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Returned';
-  mode: string;
-  createdAt: string;
-  sourceDocumentId?: string;
-};
-
-type SalesDocLine = {
-  id: string;
-  material?: string;
-  quantity?: number;
-  unitPrice?: number;
-  lineTotal?: number;
-  costPrice?: number;
-  category?: string;
-};
-
-type SalesDocument = {
-  id: string;
-  documentType?: string;
-  orderNumber: string;
-  status?: string;
-  issueDate?: string;
-  createdAt?: string;
-  subtotal?: number;
-  taxTotal?: number;
-  grandTotal?: number;
-  salesChannel?: 'Online' | 'Offline' | string;
-  customerSnapshot?: { name?: string; company?: string };
-  lines?: SalesDocLine[];
-};
-
-type ExpenseRecord = {
-  id: string;
-  date: string;
-  category: string;
-  amount: number;
-};
-
-type InventoryProduct = {
-  id: string;
-  name: string;
-  sku?: string;
-  stock?: number;
-  quantity?: number;
-  onHand?: number;
-  reorderLevel?: number;
-  reorderThreshold?: number;
-  cost?: number;
-  purchasePrice?: number;
-  unitCost?: number;
-  active?: boolean;
-};
-
-type PurchaseOrder = {
-  id: string;
-  orderNumber?: string;
-  status?: string;
-  remainingQty?: number;
-  total?: number;
-  dueDate?: string;
-  createdAt?: string;
-};
-
 type StatCard = {
   id: string;
   label: string;
@@ -509,27 +459,62 @@ type MonthlyBucket = {
   profit: number;
 };
 
-// ============================================================
-// STORAGE KEYS
-// ============================================================
-const TXN_KEY = 'zakhira_transactions';
-const DOCS_KEY = 'zakhira_sales_documents';
-const EXP_KEY = 'zakhira_expenses';
-const INV_KEY = 'zakhira_inventory_products';
-const PO_KEY = 'zakhira_purchase_orders';
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
+};
+
+const EMPTY_STATS: DashboardStats = {
+  totalSales: 0,
+  netProfit: 0,
+  receivedAmountTotal: 0,
+  receivables: 0,
+  inventoryValue: 0,
+  supplierPayables: 0,
+  lowStock: [],
+  outOfStock: [],
+  pendingPOs: [],
+  supplierDue: [],
+  recentInvoices: [],
+  activities: [],
+  monthly: [],
+  onlineSales: 0,
+  offlineSales: 0,
+  hasChannelData: false,
+  top5: [],
+  lowStockDisplay: [],
+};
 
 // ============================================================
 // HELPERS
 // ============================================================
-const loadJSON = <T,>(key: string): T[] => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+
+/** Supabase throws plain objects (message/details/hint/code) */
+const describeError = (err: unknown): Omit<ErrorInfo, 'title'> => {
+  if (err && typeof err === 'object') {
+    const e = err as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+      status?: number;
+    };
+    const details = [
+      e.details,
+      e.hint ? `Hint: ${e.hint}` : '',
+      e.status ? `Status: ${e.status}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return {
+      message: e.message || JSON.stringify(err),
+      details: details || undefined,
+      code: e.code,
+    };
   }
+  return { message: String(err) };
 };
 
 const fmt = (n: number): string => {
@@ -539,27 +524,6 @@ const fmt = (n: number): string => {
     maximumFractionDigits: 2,
   })}`;
 };
-
-const formatShortMonth = (key: string): string => {
-  const [y, m] = key.split('-');
-  const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
-};
-
-const getMonthKey = (iso: string): string | null => {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const isReturn = (t: Transaction): boolean =>
-  t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned');
-
-const receivedAmount = (t: Transaction): number =>
-  t.status === 'Paid' ? t.amount : 0;
-
-const dueAmount = (t: Transaction): number =>
-  t.status === 'Paid' || t.status === 'Returned' ? 0 : t.amount;
 
 // ============================================================
 // CHART HELPERS
@@ -600,11 +564,11 @@ const BarLineChart = ({
 }: {
   data: MonthlyBucket[];
 }): React.JSX.Element => {
-  if (data.length === 0) return <EmptyChart height={220} />;
+  if (data.length === 0) return <EmptyChart height={170} />;
 
   const W = 600;
-  const H = 260;
-  const pad = { top: 15, right: 50, bottom: 30, left: 50 };
+  const H = 210;
+  const pad = { top: 12, right: 44, bottom: 26, left: 44 };
   const iW = W - pad.left - pad.right;
   const iH = H - pad.top - pad.bottom;
 
@@ -618,7 +582,7 @@ const BarLineChart = ({
   const rTop = rMax === rMin ? 1 : rMax;
 
   const groupW = iW / data.length;
-  const barW = Math.min(groupW * 0.3, 28);
+  const barW = Math.min(groupW * 0.26, 24);
   const xC = (i: number) => pad.left + groupW * i + groupW / 2;
   const yL = (v: number) => pad.top + iH - (Math.max(0, v) / leftMax) * iH;
   const hL = (v: number) => (Math.max(0, v) / leftMax) * iH;
@@ -632,7 +596,7 @@ const BarLineChart = ({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="w-full h-auto"
+      className="w-full h-auto max-h-[210px]"
       preserveAspectRatio="xMidYMid meet"
     >
       {ticks.map((r) => {
@@ -649,19 +613,19 @@ const BarLineChart = ({
               strokeWidth="1"
             />
             <text
-              x={pad.left - 8}
+              x={pad.left - 6}
               y={y + 3}
               textAnchor="end"
-              fontSize="10"
+              fontSize="9"
               fill={THEME.charcoal}
             >
               {compact(leftMax * r)}
             </text>
             <text
-              x={W - pad.right + 8}
+              x={W - pad.right + 6}
               y={y + 3}
               textAnchor="start"
-              fontSize="10"
+              fontSize="9"
               fill={THEME.charcoal}
             >
               {compact(rMin + (rTop - rMin) * r)}
@@ -721,7 +685,7 @@ const BarLineChart = ({
         d={linePath}
         fill="none"
         stroke={THEME.warmBrass}
-        strokeWidth={2.5}
+        strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -730,7 +694,7 @@ const BarLineChart = ({
           <circle
             cx={xC(i)}
             cy={yR(b.profit)}
-            r={3.5}
+            r={3}
             fill={THEME.warmBrass}
             stroke="#FFFFFF"
             strokeWidth={1.5}
@@ -739,9 +703,9 @@ const BarLineChart = ({
           </circle>
           <text
             x={xC(i)}
-            y={H - 10}
+            y={H - 8}
             textAnchor="middle"
-            fontSize="10"
+            fontSize="9"
             fill={THEME.charcoal}
           >
             {b.label}
@@ -761,7 +725,7 @@ const PieChart = ({
   slices: { label: string; value: number; color: string }[];
 }): React.JSX.Element => {
   const total = slices.reduce((s, x) => s + x.value, 0);
-  if (total <= 0) return <EmptyChart height={180} />;
+  if (total <= 0) return <EmptyChart height={140} />;
 
   const cx = 100;
   const cy = 100;
@@ -769,29 +733,29 @@ const PieChart = ({
   const visible = slices.filter((s) => s.value > 0);
 
   const parts = visible.map((s, idx) => {
-      const frac = s.value / total;
-      const before = visible
-        .slice(0, idx)
-        .reduce((sum, x) => sum + x.value / total, 0);
-      const start = -Math.PI / 2 + before * 2 * Math.PI;
-      const end = start + frac * 2 * Math.PI;
-      const mid = (start + end) / 2;
-      const x1 = cx + r * Math.cos(start);
-      const y1 = cy + r * Math.sin(start);
-      const x2 = cx + r * Math.cos(end);
-      const y2 = cy + r * Math.sin(end);
-      const large = frac > 0.5 ? 1 : 0;
-      return {
-        ...s,
-        pct: Math.round(frac * 100),
-        path: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`,
-        lx: cx + r * 0.6 * Math.cos(mid),
-        ly: cy + r * 0.6 * Math.sin(mid),
-      };
-    });
+    const frac = s.value / total;
+    const before = visible
+      .slice(0, idx)
+      .reduce((sum, x) => sum + x.value / total, 0);
+    const start = -Math.PI / 2 + before * 2 * Math.PI;
+    const end = start + frac * 2 * Math.PI;
+    const mid = (start + end) / 2;
+    const x1 = cx + r * Math.cos(start);
+    const y1 = cy + r * Math.sin(start);
+    const x2 = cx + r * Math.cos(end);
+    const y2 = cy + r * Math.sin(end);
+    const large = frac > 0.5 ? 1 : 0;
+    return {
+      ...s,
+      pct: Math.round(frac * 100),
+      path: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`,
+      lx: cx + r * 0.6 * Math.cos(mid),
+      ly: cy + r * 0.6 * Math.sin(mid),
+    };
+  });
 
   return (
-    <svg viewBox="0 0 200 200" className="w-full h-auto max-w-[200px] mx-auto">
+    <svg viewBox="0 0 200 200" className="w-full h-auto max-w-[150px] mx-auto">
       <circle cx={cx} cy={cy} r={r + 6} fill={THEME.warmIvory} />
       {parts.length === 1 ? (
         <circle cx={cx} cy={cy} r={r} fill={parts[0].color} />
@@ -828,14 +792,13 @@ const PieChart = ({
 
 // ============================================================
 // VERTICAL BAR CHART (Top 5 Products, value on top of bars)
-// 🔧 Only change: thinner bars (barW). Colors/fill/corners/grid = original.
 // ============================================================
 const BarChart = ({
   data,
 }: {
   data: { name: string; value: number }[];
 }): React.JSX.Element => {
-  if (data.length === 0) return <EmptyChart height={180} />;
+  if (data.length === 0) return <EmptyChart height={140} />;
 
   const colors = [
     THEME.deepForest,
@@ -845,19 +808,18 @@ const BarChart = ({
     THEME.success,
   ];
   const W = 500;
-  const H = 230;
-  const pad = { top: 25, right: 10, bottom: 35, left: 40 };
+  const H = 180;
+  const pad = { top: 20, right: 10, bottom: 30, left: 36 };
   const iW = W - pad.left - pad.right;
   const iH = H - pad.top - pad.bottom;
   const maxV = niceMax(Math.max(...data.map((d) => d.value), 0));
   const groupW = iW / data.length;
-  // 🔽 thinner bars — was Math.min(groupW * 0.5, 60)
-  const barW = Math.min(groupW * 0.28, 34);
+  const barW = Math.min(groupW * 0.26, 30);
 
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="w-full h-auto"
+      className="w-full h-auto max-h-[180px]"
       preserveAspectRatio="xMidYMid meet"
     >
       {[0, 0.25, 0.5, 0.75, 1].map((r) => {
@@ -874,10 +836,10 @@ const BarChart = ({
               strokeWidth="1"
             />
             <text
-              x={pad.left - 6}
+              x={pad.left - 5}
               y={y + 3}
               textAnchor="end"
-              fontSize="10"
+              fontSize="9"
               fill={THEME.mutedOlive}
             >
               {compact(maxV * r)}
@@ -905,9 +867,9 @@ const BarChart = ({
             </rect>
             <text
               x={x + barW / 2}
-              y={y - 6}
+              y={y - 5}
               textAnchor="middle"
-              fontSize="11"
+              fontSize="10"
               fontWeight="700"
               fill={THEME.charcoal}
             >
@@ -915,9 +877,9 @@ const BarChart = ({
             </text>
             <text
               x={x + barW / 2}
-              y={H - 14}
+              y={H - 10}
               textAnchor="middle"
-              fontSize="10"
+              fontSize="9"
               fill={THEME.charcoal}
             >
               {label}
@@ -930,11 +892,99 @@ const BarChart = ({
 };
 
 // ============================================================
+// ERROR MODAL (backend errors popup)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: `${THEME.charcoal}80`, backdropFilter: 'blur(4px)' }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="rounded-2xl w-full max-w-md max-h-[92vh] flex flex-col shadow-xl"
+        style={{ background: THEME.warmIvory }}
+      >
+        <div
+          className="flex items-start justify-between gap-3 px-5 pt-5 pb-3"
+          style={{ borderBottom: `1px solid ${THEME.mutedOlive}20` }}
+        >
+          <h2 className="text-sm font-bold" style={{ color: THEME.deepForest }}>
+            {info.title}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-7 h-7 flex-shrink-0 rounded-full flex items-center justify-center cursor-pointer"
+            style={{
+              background: `${THEME.mutedOlive}15`,
+              color: THEME.mutedOlive,
+            }}
+          >
+            {Icons.x}
+          </button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto">
+          <div className="flex items-start gap-2 mb-3">
+            <span className="mt-0.5" style={{ color: THEME.danger }}>
+              {Icons.alert}
+            </span>
+            <p
+              className="text-[13px] font-semibold break-words"
+              style={{ color: THEME.charcoal }}
+            >
+              {info.message}
+            </p>
+          </div>
+          {(info.details || info.code) && (
+            <div
+              dir="ltr"
+              className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+              style={{
+                background: '#FFFFFF',
+                border: `1px solid ${THEME.mutedOlive}30`,
+                color: THEME.mutedOlive,
+              }}
+            >
+              {info.code ? `Code: ${info.code}\n` : ''}
+              {info.details}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className="w-full h-9 rounded-full text-[13px] font-bold cursor-pointer"
+            style={{ background: THEME.warmBrass, color: THEME.warmIvory }}
+          >
+            {okLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN COMPONENT
 // ============================================================
 export default function DashboardPage(): React.JSX.Element {
   const navigate = useNavigate();
-  const [tick, setTick] = useState(0);
 
   const user = JSON.parse(localStorage.getItem('zakhira_user') || '{}');
   const userName = user.email ? user.email.split('@')[0] : 'Owner';
@@ -943,6 +993,10 @@ export default function DashboardPage(): React.JSX.Element {
   const [language, setLanguage] = useState<Language>(
     (user.language as Language) || 'en'
   );
+
+  const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
+  const [loading, setLoading] = useState(true);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   useEffect(() => {
     const sync = () => {
@@ -953,271 +1007,49 @@ export default function DashboardPage(): React.JSX.Element {
     return () => window.removeEventListener('storage', sync);
   }, []);
 
-  useEffect(() => {
-    const reload = () => setTick((v) => v + 1);
-    window.addEventListener('focus', reload);
-    window.addEventListener('zakhira:sales-updated', reload as EventListener);
-    return () => {
-      window.removeEventListener('focus', reload);
-      window.removeEventListener(
-        'zakhira:sales-updated',
-        reload as EventListener
-      );
-    };
-  }, []);
-
   const tr = t[language];
 
-  const data = useMemo(() => {
-    const transactions = loadJSON<Transaction>(TXN_KEY);
-    const documents = loadJSON<SalesDocument>(DOCS_KEY);
-    const expenses = loadJSON<ExpenseRecord>(EXP_KEY);
-    const products = loadJSON<InventoryProduct>(INV_KEY);
-    const pos = loadJSON<PurchaseOrder>(PO_KEY);
+  /** Logs to console AND shows the popup */
+  const reportError = (title: string, err: unknown): void => {
+    console.error(`[Dashboard] ${title}`, err);
+    setErrorInfo({ title, ...describeError(err) });
+  };
 
-    // --------------------------
-    // 6 Cards (Section 8)
-    // --------------------------
-    const ins = transactions.filter((x) => x.type === 'In');
-    const returns = transactions.filter(isReturn);
-    const outs = transactions.filter(
-      (x) => x.type === 'Out' && x.status !== 'Returned'
-    );
-
-    const totalSales =
-      ins.reduce((s, t) => s + t.amount, 0) -
-      returns.reduce((s, t) => s + t.amount, 0);
-
-    let cogs = 0;
-    for (const d of documents) {
-      for (const l of d.lines || []) {
-        const q = Number(l.quantity || 0);
-        const c = Number(l.costPrice || 0);
-        if (q > 0 && c > 0) cogs += q * c;
-      }
+  const refresh = async (silent = false): Promise<void> => {
+    try {
+      const fresh = await dashboardService.getDashboardData();
+      setStats(fresh);
+    } catch (err) {
+      // Background refreshes only log; the first load shows the popup
+      if (silent) console.error('[Dashboard] background refresh failed', err);
+      else reportError(tr.errLoadDashboard, err);
+    } finally {
+      setLoading(false);
     }
-    if (cogs === 0 && totalSales > 0) cogs = totalSales * 0.6;
+  };
 
-    const otherExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-    const netProfit = totalSales - cogs - otherExpenses;
-
-    const receivedAmountTotal = ins.reduce((s, t) => s + receivedAmount(t), 0);
-    const receivables = ins.reduce((s, t) => s + dueAmount(t), 0);
-    const supplierPayables = outs.reduce((s, t) => s + dueAmount(t), 0);
-
-    let inventoryValue = 0;
-    for (const p of products) {
-      const qty = Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
-      const cost = Number(p.unitCost ?? p.cost ?? p.purchasePrice ?? 0);
-      if (qty > 0 && cost > 0) inventoryValue += qty * cost;
-    }
-
-    const cashOutflow =
-      outs.reduce((s, t) => s + t.amount, 0) + otherExpenses;
-    const accountBalance = receivedAmountTotal - cashOutflow;
-
-    // --------------------------
-    // Alerts (Section 8.2)
-    // --------------------------
-    const lowStock = products.filter((p) => {
-      const qty = Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
-      const th = Number(p.reorderThreshold ?? p.reorderLevel ?? 5);
-      return p.active !== false && qty > 0 && qty <= th;
-    });
-    const outOfStock = products.filter((p) => {
-      const qty = Number(p.onHand ?? p.stock ?? p.quantity ?? 0);
-      return p.active !== false && qty <= 0;
-    });
-    const pendingPOs = pos.filter(
-      (po) => po.status === 'Approved' && Number(po.remainingQty || 0) > 0
-    );
-    const now = new Date();
-    const alertWindow = new Date();
-    alertWindow.setDate(now.getDate() + 7);
-    const supplierDue = outs.filter((t) => {
-      const d = new Date(t.date);
-      return dueAmount(t) > 0 && d <= alertWindow;
-    });
-
-    // --------------------------
-    // Recent Invoices — with Partial Payment status
-    // --------------------------
-    const recentInvoices: RecentInvoice[] = [...ins]
-      .sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      )
-      .slice(0, 5)
-      .map((t) => {
-        let status: 'Paid' | 'Pending' | 'Partial Payment' | 'Overdue' = 'Paid';
-        if (t.status === 'Partially Paid') {
-          const days = Math.floor(
-            (Date.now() - new Date(t.date).getTime()) / (1000 * 60 * 60 * 24)
-          );
-          status = days > 30 ? 'Overdue' : 'Partial Payment';
-        } else if (t.status === 'Pending') {
-          const days = Math.floor(
-            (Date.now() - new Date(t.date).getTime()) / (1000 * 60 * 60 * 24)
-          );
-          status = days > 30 ? 'Overdue' : 'Pending';
-        } else if (t.status === 'Returned') {
-          status = 'Pending';
-        }
-        return {
-          id: t.invoiceRef || t.transactionNo,
-          customer: t.customerName || t.companyName || '—',
-          amount: t.amount,
-          status,
-        };
-      });
-
-    // --------------------------
-    // Recent Activity
-    // --------------------------
-    const activitySource = [...transactions]
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt || b.date).getTime() -
-          new Date(a.createdAt || a.date).getTime()
-      )
-      .slice(0, 5);
-
-    const activities: Activity[] = activitySource.map((t) => {
-      const type: Activity['type'] =
-        t.type === 'In' ? 'sale' : t.type === 'Out' ? 'purchase' : 'payment';
-      const when = new Date(t.createdAt || t.date);
-      const diffMs = Date.now() - when.getTime();
-      const diffMin = Math.floor(diffMs / 60000);
-      let time = '';
-      if (diffMin < 60) time = `${diffMin} min`;
-      else if (diffMin < 1440) time = `${Math.floor(diffMin / 60)} hr`;
-      else time = `${Math.floor(diffMin / 1440)} d`;
-      return {
-        id: t.id,
-        type,
-        message:
-          t.type === 'In'
-            ? `${t.invoiceRef || t.transactionNo} — ${
-                t.customerName || 'Sale'
-              } (${fmt(t.amount)})`
-            : t.type === 'Out'
-              ? `Purchase: ${t.customerName || 'Supplier'} (${fmt(t.amount)})`
-              : `Return: ${t.invoiceRef || t.transactionNo} (${fmt(t.amount)})`,
-        time,
-      };
-    });
-
-    // --------------------------
-    // Monthly buckets
-    // --------------------------
-    const bMap = new Map<string, MonthlyBucket>();
-    const addB = (iso: string): MonthlyBucket | null => {
-      const k = getMonthKey(iso);
-      if (!k) return null;
-      let b = bMap.get(k);
-      if (!b) {
-        b = {
-          key: k,
-          label: formatShortMonth(k),
-          revenue: 0,
-          expenses: 0,
-          profit: 0,
-        };
-        bMap.set(k, b);
-      }
-      return b;
+  // Initial load + refresh on window focus / sales update
+  useEffect(() => {
+    void refresh(false);
+    const bg = (): void => void refresh(true);
+    window.addEventListener('focus', bg);
+    window.addEventListener('zakhira:sales-updated', bg);
+    return () => {
+      window.removeEventListener('focus', bg);
+      window.removeEventListener('zakhira:sales-updated', bg);
     };
-    for (const t of transactions) {
-      const b = addB(t.date);
-      if (!b) continue;
-      if (t.type === 'In') b.revenue += t.amount;
-      else if (t.type === 'Return') b.revenue -= t.amount;
-      else if (t.type === 'Out' && t.status !== 'Returned')
-        b.expenses += t.amount;
-    }
-    for (const e of expenses) {
-      const b = addB(e.date);
-      if (!b) continue;
-      b.expenses += e.amount;
-    }
-    bMap.forEach((b) => {
-      b.profit = b.revenue - b.expenses;
-    });
-    const monthly = Array.from(bMap.values())
-      .sort((a, b) => a.key.localeCompare(b.key))
-      .slice(-6);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // --------------------------
-    // Online vs Offline
-    // --------------------------
-    let onlineSales = 0;
-    let offlineSales = 0;
-    for (const t of ins) {
-      const doc = documents.find(
-        (d) => d.orderNumber === t.invoiceRef || d.id === t.sourceDocumentId
-      );
-      const channel = (doc?.salesChannel || '').toLowerCase();
-      if (channel === 'online') onlineSales += t.amount;
-      else offlineSales += t.amount;
-    }
-    const hasChannelData = onlineSales + offlineSales > 0;
-
-    // --------------------------
-    // Top 5 products
-    // --------------------------
-    const productMap = new Map<string, { qty: number; revenue: number }>();
-    for (const d of documents) {
-      for (const l of d.lines || []) {
-        const name = l.material || 'Unknown';
-        const q = Number(l.quantity || 0);
-        const r = Number(l.lineTotal || 0);
-        const cur = productMap.get(name) || { qty: 0, revenue: 0 };
-        cur.qty += q;
-        cur.revenue += r;
-        productMap.set(name, cur);
-      }
-    }
-    const top5 = Array.from(productMap.entries())
-      .map(([name, v]) => ({ name, qty: v.qty, revenue: v.revenue }))
-      .sort((a, b) => b.qty - a.qty)
-      .slice(0, 5);
-
-    // --------------------------
-    // Low stock display
-    // --------------------------
-    const lowStockDisplay: LowStockProduct[] = lowStock.slice(0, 4).map((p) => ({
-      id: p.id,
-      name: p.name || '—',
-      sku: p.sku || '—',
-      stock: Number(p.onHand ?? p.stock ?? p.quantity ?? 0),
-    }));
-
-    const pendingInvoicesCount = ins.filter(
-      (t) => t.status === 'Pending' || t.status === 'Partially Paid'
-    ).length;
-
-    return {
-      totalSales,
-      netProfit,
-      receivedAmountTotal,
-      receivables,
-      inventoryValue,
-      supplierPayables,
-      accountBalance,
-      lowStock,
-      outOfStock,
-      pendingPOs,
-      supplierDue,
-      recentInvoices,
-      activities,
-      monthly,
-      onlineSales,
-      offlineSales,
-      hasChannelData,
-      top5,
-      lowStockDisplay,
-      pendingInvoicesCount,
-    };
-  }, [tick]);
+  // The service already returns every calculated number; only typing here
+  const data = {
+    ...stats,
+    recentInvoices: stats.recentInvoices as RecentInvoice[],
+    activities: stats.activities as Activity[],
+    monthly: stats.monthly as MonthlyBucket[],
+    lowStockDisplay: stats.lowStockDisplay as LowStockProduct[],
+    top5: stats.top5 as { name: string; qty: number; revenue: number }[],
+  };
 
   const formatCurrency = (n: number): string => fmt(n);
 
@@ -1337,17 +1169,17 @@ export default function DashboardPage(): React.JSX.Element {
 
   return (
     <div
-      className="min-h-screen p-4 lg:p-5"
+      className="min-h-screen p-3 lg:p-4"
       style={{ background: THEME.warmIvory }}
     >
       {/* HEADER */}
-      <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: THEME.deepForest }}>
+          <h1 className="text-lg font-bold" style={{ color: THEME.deepForest }}>
             {tr.dashboard}
           </h1>
           <p
-            className="mt-1 text-[12px] leading-relaxed"
+            className="mt-0.5 text-[11px] leading-relaxed"
             style={{ color: THEME.mutedOlive }}
           >
             {tr.welcome}{' '}
@@ -1358,13 +1190,16 @@ export default function DashboardPage(): React.JSX.Element {
               {userName}
             </span>{' '}
             {tr.welcomeSuffix}
+            {loading && (
+              <span className="ms-2 font-semibold">{tr.loading}</span>
+            )}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate('/sales')}
-            className="px-3 py-1.5 rounded-lg text-[12px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
+            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
             style={{
               background: THEME.warmBrass,
               color: THEME.warmIvory,
@@ -1384,22 +1219,22 @@ export default function DashboardPage(): React.JSX.Element {
         </div>
       </div>
 
-      {/* STAT CARDS — 🔧 label chhota, number bara + bold */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+      {/* STAT CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3">
         {STATS.map((stat) => (
           <button
             key={stat.id}
             onClick={() => navigate(stat.path)}
-            className="group rounded-xl p-3 cursor-pointer transition-all duration-300 hover:-translate-y-0.5 text-start min-w-0"
+            className="group rounded-xl p-2.5 cursor-pointer transition-all duration-300 hover:-translate-y-0.5 text-start min-w-0"
             style={{
               background: '#fff',
               border: `1px solid ${THEME.mutedOlive}20`,
               boxShadow: '0 1px 2px rgba(18,60,50,0.04)',
             }}
           >
-            <div className="flex items-start justify-between mb-3 gap-1">
+            <div className="flex items-start justify-between mb-2 gap-1">
               <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-105"
+                className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-105"
                 style={{
                   background: stat.bg,
                   color: THEME.warmIvory,
@@ -1423,34 +1258,32 @@ export default function DashboardPage(): React.JSX.Element {
                 </span>
               )}
             </div>
-            {/* 🔽 smaller label */}
             <p
-              className="text-[8px] font-semibold uppercase tracking-wider mb-1 truncate"
+              className="text-[8px] font-semibold uppercase tracking-wider mb-0.5 truncate"
               style={{ color: THEME.mutedOlive }}
             >
               {stat.label}
             </p>
-            {/* 🔼 bigger + bolder number */}
-          <p
-  className="text-[18px] font-bold break-words leading-tight tabular-nums"
-  style={{ color: THEME.charcoal }}
->
-  {stat.value}
-</p>
+            <p
+              className="text-[15px] font-bold break-words leading-tight tabular-nums"
+              style={{ color: THEME.charcoal }}
+            >
+              {stat.value}
+            </p>
           </button>
         ))}
       </div>
 
       {/* ALERTS PANEL */}
       <div
-        className="rounded-xl p-3.5 mb-4"
+        className="rounded-xl p-3 mb-3"
         style={{
           background: '#fff',
           border: `1px solid ${THEME.mutedOlive}20`,
         }}
       >
         <h2
-          className="text-[13px] font-bold mb-3"
+          className="text-[12px] font-bold mb-2"
           style={{ color: THEME.deepForest }}
         >
           {tr.alerts}
@@ -1458,11 +1291,11 @@ export default function DashboardPage(): React.JSX.Element {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           <button
             onClick={() => navigate('/inventory')}
-            className="flex items-center gap-2 p-2 rounded-lg text-start cursor-pointer transition"
+            className="flex items-center gap-2 p-1.5 rounded-lg text-start cursor-pointer transition"
             style={{ background: THEME.warningBg }}
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: THEME.warning, color: '#fff' }}
             >
               {Icons.alert}
@@ -1475,7 +1308,7 @@ export default function DashboardPage(): React.JSX.Element {
                 {tr.lowStockAlert}
               </p>
               <p
-                className="text-[12px] font-bold"
+                className="text-[11px] font-bold"
                 style={{ color: THEME.charcoal }}
               >
                 {data.lowStock.length} {tr.items}
@@ -1484,11 +1317,11 @@ export default function DashboardPage(): React.JSX.Element {
           </button>
           <button
             onClick={() => navigate('/inventory')}
-            className="flex items-center gap-2 p-2 rounded-lg text-start cursor-pointer transition"
+            className="flex items-center gap-2 p-1.5 rounded-lg text-start cursor-pointer transition"
             style={{ background: THEME.dangerBg }}
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: THEME.danger, color: '#fff' }}
             >
               {Icons.box}
@@ -1501,7 +1334,7 @@ export default function DashboardPage(): React.JSX.Element {
                 {tr.outOfStockAlert}
               </p>
               <p
-                className="text-[12px] font-bold"
+                className="text-[11px] font-bold"
                 style={{ color: THEME.charcoal }}
               >
                 {data.outOfStock.length} {tr.products}
@@ -1510,11 +1343,11 @@ export default function DashboardPage(): React.JSX.Element {
           </button>
           <button
             onClick={() => navigate('/inventory/orders')}
-            className="flex items-center gap-2 p-2 rounded-lg text-start cursor-pointer transition"
+            className="flex items-center gap-2 p-1.5 rounded-lg text-start cursor-pointer transition"
             style={{ background: '#e0e7ff' }}
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: '#4f46e5', color: '#fff' }}
             >
               {Icons.document}
@@ -1527,7 +1360,7 @@ export default function DashboardPage(): React.JSX.Element {
                 {tr.pendingPOsAlert}
               </p>
               <p
-                className="text-[12px] font-bold"
+                className="text-[11px] font-bold"
                 style={{ color: THEME.charcoal }}
               >
                 {data.pendingPOs.length} {tr.orders}
@@ -1536,11 +1369,11 @@ export default function DashboardPage(): React.JSX.Element {
           </button>
           <button
             onClick={() => navigate('/accounting')}
-            className="flex items-center gap-2 p-2 rounded-lg text-start cursor-pointer transition"
+            className="flex items-center gap-2 p-1.5 rounded-lg text-start cursor-pointer transition"
             style={{ background: THEME.warningBg }}
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: THEME.warning, color: '#fff' }}
             >
               {Icons.creditCard}
@@ -1553,7 +1386,7 @@ export default function DashboardPage(): React.JSX.Element {
                 {tr.supplierDueAlert}
               </p>
               <p
-                className="text-[12px] font-bold"
+                className="text-[11px] font-bold"
                 style={{ color: THEME.charcoal }}
               >
                 {data.supplierDue.length} {tr.bills}
@@ -1564,17 +1397,17 @@ export default function DashboardPage(): React.JSX.Element {
       </div>
 
       {/* ROW 1: BAR-LINE + PIE */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
         <div
-          className="lg:col-span-2 rounded-xl p-3.5 min-w-0"
+          className="lg:col-span-2 rounded-xl p-3 min-w-0"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
-          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <h2
-              className="text-[13px] font-bold"
+              className="text-[12px] font-bold"
               style={{ color: THEME.deepForest }}
             >
               {tr.revenueVsExpenses}
@@ -1616,14 +1449,14 @@ export default function DashboardPage(): React.JSX.Element {
         </div>
 
         <div
-          className="rounded-xl p-3.5 min-w-0"
+          className="rounded-xl p-3 min-w-0"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
           <h2
-            className="text-[13px] font-bold mb-3"
+            className="text-[12px] font-bold mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.onlineVsOffline}
@@ -1644,7 +1477,7 @@ export default function DashboardPage(): React.JSX.Element {
                   },
                 ]}
               />
-              <div className="mt-3 space-y-1">
+              <div className="mt-2 space-y-1">
                 <div className="flex items-center justify-between text-[10px] font-bold">
                   <span
                     className="flex items-center gap-1.5"
@@ -1689,16 +1522,16 @@ export default function DashboardPage(): React.JSX.Element {
       </div>
 
       {/* ROW 2: TOP 5 BAR CHART + LOW STOCK */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
         <div
-          className="lg:col-span-2 rounded-xl p-3.5 min-w-0"
+          className="lg:col-span-2 rounded-xl p-3 min-w-0"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
           <h2
-            className="text-[13px] font-bold mb-3"
+            className="text-[12px] font-bold mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.top5Products}
@@ -1709,15 +1542,15 @@ export default function DashboardPage(): React.JSX.Element {
         </div>
 
         <div
-          className="rounded-xl p-3.5"
+          className="rounded-xl p-3"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <h2
-              className="text-[13px] font-bold"
+              className="text-[12px] font-bold"
               style={{ color: THEME.deepForest }}
             >
               {tr.lowStock}
@@ -1732,10 +1565,10 @@ export default function DashboardPage(): React.JSX.Element {
             </button>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {data.lowStockDisplay.length === 0 ? (
               <p
-                className="text-[11px] text-center py-4"
+                className="text-[11px] text-center py-3"
                 style={{ color: THEME.mutedOlive }}
               >
                 {tr.noData}
@@ -1744,7 +1577,7 @@ export default function DashboardPage(): React.JSX.Element {
               data.lowStockDisplay.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200"
+                  className="flex items-center gap-2 p-1.5 rounded-lg cursor-pointer transition-all duration-200"
                   style={{ background: 'transparent' }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = THEME.warmIvory;
@@ -1754,7 +1587,7 @@ export default function DashboardPage(): React.JSX.Element {
                   }}
                 >
                   <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                    className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{
                       background: THEME.warmIvory,
                       color: THEME.deepForest,
@@ -1764,7 +1597,7 @@ export default function DashboardPage(): React.JSX.Element {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p
-                      className="text-[12px] font-semibold truncate"
+                      className="text-[11px] font-semibold truncate"
                       style={{ color: THEME.charcoal }}
                     >
                       {p.name}
@@ -1793,7 +1626,7 @@ export default function DashboardPage(): React.JSX.Element {
 
           <button
             onClick={() => navigate('/inventory/orders')}
-            className="w-full mt-3 py-1.5 rounded-lg text-[12px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5"
+            className="w-full mt-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5"
             style={{
               border: `2px solid ${THEME.warmBrass}`,
               color: THEME.warmBrass,
@@ -1814,17 +1647,17 @@ export default function DashboardPage(): React.JSX.Element {
       </div>
 
       {/* RECENT INVOICES + ACTIVITY */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
         <div
-          className="lg:col-span-2 rounded-xl p-3.5"
+          className="lg:col-span-2 rounded-xl p-3"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <h2
-              className="text-[13px] font-bold"
+              className="text-[12px] font-bold"
               style={{ color: THEME.deepForest }}
             >
               {tr.recentInvoices}
@@ -1841,7 +1674,7 @@ export default function DashboardPage(): React.JSX.Element {
 
           {data.recentInvoices.length === 0 ? (
             <p
-              className="text-[11px] italic text-center py-6"
+              className="text-[11px] italic text-center py-5"
               style={{ color: THEME.mutedOlive }}
             >
               {tr.noData}
@@ -1856,25 +1689,25 @@ export default function DashboardPage(): React.JSX.Element {
                     }}
                   >
                     <th
-                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-2"
+                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-1.5"
                       style={{ color: THEME.mutedOlive }}
                     >
                       {tr.invoice}
                     </th>
                     <th
-                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-2"
+                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-1.5"
                       style={{ color: THEME.mutedOlive }}
                     >
                       {tr.customer}
                     </th>
                     <th
-                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-2"
+                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-1.5"
                       style={{ color: THEME.mutedOlive }}
                     >
                       {tr.amount}
                     </th>
                     <th
-                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-2"
+                      className="text-left text-[9px] font-bold uppercase tracking-wider pb-1.5"
                       style={{ color: THEME.mutedOlive }}
                     >
                       {tr.status}
@@ -1900,24 +1733,24 @@ export default function DashboardPage(): React.JSX.Element {
                         }}
                       >
                         <td
-                          className="py-2 text-[12px] font-semibold font-mono"
+                          className="py-1.5 text-[11px] font-semibold font-mono"
                           style={{ color: THEME.charcoal }}
                         >
                           {inv.id}
                         </td>
                         <td
-                          className="py-2 text-[12px] truncate max-w-[150px]"
+                          className="py-1.5 text-[11px] truncate max-w-[150px]"
                           style={{ color: THEME.mutedOlive }}
                         >
                           {inv.customer}
                         </td>
                         <td
-                          className="py-2 text-[12px] font-semibold whitespace-nowrap"
+                          className="py-1.5 text-[11px] font-semibold whitespace-nowrap"
                           style={{ color: THEME.charcoal }}
                         >
                           {formatCurrency(inv.amount)}
                         </td>
-                        <td className="py-2">
+                        <td className="py-1.5">
                           <span
                             className="text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                             style={{ background: st.bg, color: st.color }}
@@ -1935,31 +1768,31 @@ export default function DashboardPage(): React.JSX.Element {
         </div>
 
         <div
-          className="rounded-xl p-3.5"
+          className="rounded-xl p-3"
           style={{
             background: '#fff',
             border: `1px solid ${THEME.mutedOlive}20`,
           }}
         >
           <h2
-            className="text-[13px] font-bold mb-3"
+            className="text-[12px] font-bold mb-2"
             style={{ color: THEME.deepForest }}
           >
             {tr.recentActivity}
           </h2>
           {data.activities.length === 0 ? (
             <p
-              className="text-[11px] italic text-center py-6"
+              className="text-[11px] italic text-center py-5"
               style={{ color: THEME.mutedOlive }}
             >
               {tr.noData}
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {data.activities.map((a) => (
                 <div
                   key={a.id}
-                  className="flex gap-2 cursor-pointer rounded-lg p-2 -m-2 transition-all duration-200"
+                  className="flex gap-2 cursor-pointer rounded-lg p-1.5 transition-all duration-200"
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = THEME.warmIvory;
                   }}
@@ -1968,7 +1801,7 @@ export default function DashboardPage(): React.JSX.Element {
                   }}
                 >
                   <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                    className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{
                       background: THEME.warmIvory,
                       color: THEME.deepForest,
@@ -1980,7 +1813,7 @@ export default function DashboardPage(): React.JSX.Element {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p
-                      className="text-[12px] leading-relaxed"
+                      className="text-[11px] leading-snug"
                       style={{ color: THEME.charcoal }}
                     >
                       {a.message}
@@ -2001,13 +1834,13 @@ export default function DashboardPage(): React.JSX.Element {
 
       {/* QUICK ACTIONS */}
       <div
-        className="rounded-xl p-3.5"
+        className="rounded-xl p-3"
         style={{ background: THEME.deepForest }}
       >
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div>
             <h3
-              className="text-[13px] font-bold"
+              className="text-[12px] font-bold"
               style={{ color: THEME.warmIvory }}
             >
               {tr.quickActions}
@@ -2024,7 +1857,7 @@ export default function DashboardPage(): React.JSX.Element {
               <button
                 key={action.path}
                 onClick={() => navigate(action.path)}
-                className="px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
                 style={{
                   background: `${THEME.warmIvory}15`,
                   border: `1px solid ${THEME.warmIvory}25`,
@@ -2052,7 +1885,7 @@ export default function DashboardPage(): React.JSX.Element {
 
       {/* FOOTER */}
       <div
-        className="mt-4 text-center text-[10px]"
+        className="mt-3 text-center text-[10px]"
         style={{ color: THEME.mutedOlive }}
       >
         {tr.loggedInAs}{' '}
@@ -2061,6 +1894,14 @@ export default function DashboardPage(): React.JSX.Element {
         </span>{' '}
         • {tr.version}
       </div>
+
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
+        />
+      )}
     </div>
   );
 }
