@@ -6,6 +6,8 @@ import { THEME } from '@renderer/theme/theme';
 import { loadUnits, getDefaultUnit } from '../settings/SettingsPage';
 import {
   productService,
+  PRODUCTS_SYNCED_EVENT,
+  PRODUCTS_SYNC_ERROR_EVENT,
   type Product as DbProduct,
   type ProductInput,
   type Category,
@@ -122,6 +124,7 @@ const t = {
     toastHasHistory: (name: string) =>
       `${name} has order history and cannot be deleted.`,
     errDeleteStorage: 'Could not delete — storage may be full.',
+    syncFailed: 'Sync failed',
     showing: 'Showing',
     of: 'of',
     statusInStock: 'In Stock',
@@ -231,6 +234,7 @@ const t = {
     toastHasHistory: (name: string) =>
       `${name} لديه سجل طلبات ولا يمكن حذفه.`,
     errDeleteStorage: 'تعذر الحذف — قد تكون مساحة التخزين ممتلئة.',
+    syncFailed: 'فشلت المزامنة',
     showing: 'عرض',
     of: 'من',
     statusInStock: 'متوفر',
@@ -340,6 +344,7 @@ const t = {
     toastHasHistory: (name: string) =>
       `${name} کا آرڈر ہسٹری ہے اور اسے حذف نہیں کیا جا سکتا۔`,
     errDeleteStorage: 'حذف نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    syncFailed: 'سنک ناکام ہو گیا',
     showing: 'دکھا رہے ہیں',
     of: 'میں سے',
     statusInStock: 'دستیاب',
@@ -449,6 +454,7 @@ const t = {
     toastHasHistory: (name: string) =>
       `${name} का ऑर्डर इतिहास है और इसे हटाया नहीं जा सकता।`,
     errDeleteStorage: 'हटाया नहीं जा सका — स्टोरेज भरा हो सकता है।',
+    syncFailed: 'सिंक विफल रहा',
     showing: 'दिखा रहे हैं',
     of: 'में से',
     statusInStock: 'स्टॉक में',
@@ -483,6 +489,7 @@ type Product = {
   costPrice?: number; // purchase cost (optional)
   stock: number;
   lowStockLevel: number;
+  /** List rows carry only the thumbnail; edit/preview load ALL images from SQLite first */
   images: string[];
   active: boolean;
   createdAt: string;
@@ -633,9 +640,12 @@ const Icons = {
 // ============================================================
 // CONSTANTS + HELPERS
 // ============================================================
-// Temporary: backend products table has no images column,
-// so images are kept locally per product id.
-const IMAGES_KEY = 'zakhira_product_images';
+/**
+ * LEGACY ONLY: older versions kept images in localStorage under this key.
+ * Images now live in SQLite (product_images) and sync to Supabase.
+ * The old data is migrated once (see migrateLegacyImages) and then removed.
+ */
+const LEGACY_IMAGES_KEY = 'zakhira_product_images';
 
 const PAGE_SIZE = 10;
 const MAX_IMAGES = 5;
@@ -737,40 +747,37 @@ const getStoredLanguage = (): Language => {
 const isRTLLang = (l: Language): boolean => l === 'ar' || l === 'ur';
 
 // ============================================================
-// IMAGE STORAGE (temporary, local) + DB → UI MAPPING
+// LEGACY IMAGE MIGRATION + DB → UI MAPPING
 // ============================================================
-const readImageMap = (): Record<string, string[]> => {
+const readLegacyImageMap = (): Record<string, string[]> => {
   try {
-    return JSON.parse(localStorage.getItem(IMAGES_KEY) || '{}');
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_IMAGES_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
   }
 };
 
-const getProductImages = (id: string): string[] => readImageMap()[id] || [];
-
-const saveProductImages = (id: string, imgs: string[]): boolean => {
+/** Removes migrated ids from the legacy map (deletes the key when empty). */
+const dropLegacyImages = (doneIds: string[]): void => {
   try {
-    const map = readImageMap();
-    map[id] = imgs;
-    localStorage.setItem(IMAGES_KEY, JSON.stringify(map));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const removeProductImages = (id: string): void => {
-  try {
-    const map = readImageMap();
-    delete map[id];
-    localStorage.setItem(IMAGES_KEY, JSON.stringify(map));
+    const map = readLegacyImageMap();
+    doneIds.forEach((id) => delete map[id]);
+    if (Object.keys(map).length === 0) {
+      localStorage.removeItem(LEGACY_IMAGES_KEY);
+    } else {
+      localStorage.setItem(LEGACY_IMAGES_KEY, JSON.stringify(map));
+    }
   } catch {
     /* ignore */
   }
 };
 
-const toUiProduct = (p: DbProduct, cats: Category[]): Product => ({
+const toUiProduct = (
+  p: DbProduct,
+  cats: Category[],
+  thumbs: Record<string, string>
+): Product => ({
   id: p.id,
   sku: p.sku,
   name: p.name,
@@ -779,7 +786,7 @@ const toUiProduct = (p: DbProduct, cats: Category[]): Product => ({
   costPrice: Number(p.cost_price) || undefined,
   stock: Number(p.stock),
   lowStockLevel: Number(p.low_stock_level),
-  images: getProductImages(p.id),
+  images: thumbs[p.id] ? [thumbs[p.id]] : [],
   active: p.active,
   createdAt: p.created_at,
   updatedAt: p.updated_at,
@@ -1168,6 +1175,7 @@ function NewCategoryModal({
 
     setSaving(true);
     try {
+      // saved to SQLite instantly (works offline) and queued for Supabase
       const newCat = await productService.createCategory(clean);
       onSaved(newCat as Category);
     } catch {
@@ -1282,6 +1290,7 @@ function ProductFormModal({
   const [lowStockLevel, setLowStockLevel] = useState(
     product ? String(product.lowStockLevel) : String(DEFAULT_LOW_STOCK)
   );
+  // `product.images` already holds ALL images (loaded from SQLite before opening)
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -1318,7 +1327,7 @@ function ProductFormModal({
         }
         processed.push(await processImageFile(f));
       }
-      setImages((prev) => [...prev, ...processed]);
+      setImages((prev) => [...prev, ...processed].slice(0, MAX_IMAGES));
     } catch {
       setError(tr.errImageProcess);
     } finally {
@@ -1352,16 +1361,19 @@ function ProductFormModal({
       low_stock_level: Number(lowStockLevel) || DEFAULT_LOW_STOCK,
       unit_id: unit,
       category_id: categoryId,
+      // images are saved in SQLite + queued for Supabase together with the product.
+      // (the service only re-queues them when they actually changed)
+      images,
     };
 
     setSaving(true);
     setError('');
     try {
-      const saved =
-        isEdit && product
-          ? await productService.updateProduct(product.id, input)
-          : await productService.createProduct(input);
-      saveProductImages(saved.id, images);
+      if (isEdit && product) {
+        await productService.updateProduct(product.id, input);
+      } else {
+        await productService.createProduct(input);
+      }
       onSaved(input.sku, isEdit);
     } catch {
       setError(tr.errStorage);
@@ -1957,8 +1969,24 @@ export default function ProductsPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const isRTL = isRTLLang(language);
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  // event listeners (registered once) must always see the CURRENT language
+  const trRef = useRef(tr);
+  useEffect(() => {
+    trRef.current = tr;
+  });
+
+  // First paint: use the in-memory snapshot (instant on re-mount), else empty
+  const [products, setProducts] = useState<Product[]>(() => {
+    const snap = productService.getCachedSnapshot();
+    return snap
+      ? snap.products.map((p) =>
+          toUiProduct(p, snap.categories, snap.thumbnails)
+        )
+      : [];
+  });
+  const [categories, setCategories] = useState<Category[]>(
+    () => productService.getCachedSnapshot()?.categories ?? []
+  );
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -1982,28 +2010,87 @@ export default function ProductsPage(): React.JSX.Element {
     setTimeout(() => setSuccessMsg(''), 2500);
   };
 
-  const showError = (msg: string): void => {
+  const showError = (msg: string, ms = 3500): void => {
     setErrorMsg(msg);
     setSuccessMsg('');
-    setTimeout(() => setErrorMsg(''), 3500);
+    setTimeout(() => setErrorMsg(''), ms);
   };
 
+  /** Re-reads everything from local SQLite (instant, works offline). */
   const refresh = async (): Promise<void> => {
     try {
-      const [dbProducts, cats] = await Promise.all([
+      const [dbProducts, cats, thumbs] = await Promise.all([
         productService.getProducts(),
         productService.getCategories(),
+        productService.getThumbnails(),
       ]);
       setCategories(cats);
-      setProducts(dbProducts.map((p) => toUiProduct(p, cats)));
+      setProducts(dbProducts.map((p) => toUiProduct(p, cats, thumbs)));
       window.dispatchEvent(new Event('zakhira:inventory-updated'));
     } catch (e) {
-      showError(e instanceof Error ? e.message : tr.errStorage);
+      showError(e instanceof Error ? e.message : trRef.current.errStorage);
+    }
+  };
+
+  /**
+   * One-time move of images from the old localStorage store into SQLite
+   * (they then sync to Supabase automatically). Products that are not in
+   * SQLite yet are skipped and retried on the next sync event / page visit.
+   */
+  const migratingRef = useRef(false);
+  const migrateLegacyImages = async (): Promise<void> => {
+    if (migratingRef.current) return;
+    const map = readLegacyImageMap();
+    if (Object.keys(map).length === 0) return;
+    migratingRef.current = true;
+    try {
+      const done = await productService.importLegacyImages(map);
+      if (done.length > 0) {
+        dropLegacyImages(done);
+        await refresh();
+      }
+    } catch {
+      /* retried next time */
+    } finally {
+      migratingRef.current = false;
     }
   };
 
   useEffect(() => {
-    void refresh();
+    void refresh().then(() => migrateLegacyImages());
+    productService.startSyncWorker();
+
+    // Background sync changed local data → re-read SQLite
+    const onSynced = (): void => {
+      void refresh().then(() => migrateLegacyImages());
+    };
+
+    // Real (non-offline) sync problem
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent).detail as
+        | {
+            message?: string;
+            details?: string;
+            code?: string;
+            name?: string;
+            sku?: string;
+          }
+        | undefined;
+      const cur = trRef.current;
+      // 23503 + product info = a DELETE blocked because of order history
+      if (d?.code === '23503' && (d.name || d.sku)) {
+        showError(cur.toastHasHistory(d.name || d.sku || ''), 5000);
+        return;
+      }
+      showError(`${cur.syncFailed}: ${d?.message ?? ''}`, 6000);
+    };
+
+    window.addEventListener(PRODUCTS_SYNCED_EVENT, onSynced);
+    window.addEventListener(PRODUCTS_SYNC_ERROR_EVENT, onSyncError);
+    return () => {
+      window.removeEventListener(PRODUCTS_SYNCED_EVENT, onSynced);
+      window.removeEventListener(PRODUCTS_SYNC_ERROR_EVENT, onSyncError);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2107,23 +2194,35 @@ export default function ProductsPage(): React.JSX.Element {
     showSuccess(isEdit ? tr.toastUpdated(sku) : tr.toastCreated(sku));
   };
 
-  const handleEdit = (p: Product): void => {
-    setEditingProduct(p);
+  /** The list only holds thumbnails → load ALL images from SQLite first. */
+  const withAllImages = async (p: Product): Promise<Product> => {
+    try {
+      const imgs = await productService.getProductImages(p.id);
+      return { ...p, images: imgs.length > 0 ? imgs : p.images };
+    } catch {
+      return p;
+    }
+  };
+
+  const handleEdit = async (p: Product): Promise<void> => {
+    setEditingProduct(await withAllImages(p));
     setShowAddProduct(true);
+  };
+
+  const handlePreview = async (p: Product): Promise<void> => {
+    setPreviewProduct(await withAllImages(p));
   };
 
   const handleDelete = async (p: Product): Promise<void> => {
     try {
+      // removed from SQLite instantly; the DELETE is queued for Supabase.
+      // If Supabase refuses (order history) the sync error event tells the user
+      // and the product is restored by the next pull.
       await productService.deleteProduct(p.id);
-      removeProductImages(p.id);
       await refresh();
       showSuccess(tr.toastDeleted(p.sku));
-    } catch (e) {
-      // 23503 = foreign key violation (product has order history)
-      const code = (e as { code?: string })?.code;
-      showError(
-        code === '23503' ? tr.toastHasHistory(p.name) : tr.errDeleteStorage
-      );
+    } catch {
+      showError(tr.errDeleteStorage);
     } finally {
       setDeleteTarget(null);
     }
@@ -2540,13 +2639,13 @@ export default function ProductsPage(): React.JSX.Element {
                                 label: tr.actPreview,
                                 icon: Icons.eye,
                                 tone: ACTION.default,
-                                run: () => setPreviewProduct(p),
+                                run: () => void handlePreview(p),
                               },
                               {
                                 label: tr.actEdit,
                                 icon: Icons.edit,
                                 tone: ACTION.warn,
-                                run: () => handleEdit(p),
+                                run: () => void handleEdit(p),
                               },
                               {
                                 label: tr.actDelete,
@@ -2607,7 +2706,13 @@ export default function ProductsPage(): React.JSX.Element {
           product={editingProduct}
           products={products}
           categories={categories}
-          onCategoryCreated={(c) => setCategories((prev) => [...prev, c])}
+          onCategoryCreated={(c) =>
+            setCategories((prev) =>
+              [...prev.filter((x) => x.id !== c.id), c].sort((a, b) =>
+                a.name.localeCompare(b.name)
+              )
+            )
+          }
           onClose={() => {
             setShowAddProduct(false);
             setEditingProduct(null);

@@ -4,7 +4,10 @@
 /* eslint-disable react-refresh/only-export-components */
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react';
-import { inventoryChartsService } from '@renderer/services/inventoryChartsService';
+import {
+  inventoryChartsService,
+  type InventoryChartData,
+} from '@renderer/services/inventoryChartsService';
 import { THEME } from '@renderer/theme/theme';
 
 // ============================================================
@@ -348,7 +351,11 @@ function InventoryValueByCategoryChart({
   const H = axisY + 22;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full h-auto block"
+      style={{ direction: 'ltr' }}
+    >
       {rows.map((d, i) => {
         const y = top + i * (barH + gap);
         const w = Math.max((d.value / scale.max) * cw, 2);
@@ -549,18 +556,18 @@ function RevenueByCategoryChart({
 // ============================================================
 export default function InventoryCharts(): React.JSX.Element {
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
-  const [data, setData] = useState<{
-    categoryDonut: Array<{ name: string; value: number }>;
-    top7Products: Array<{ name: string; qty: number }>;
-    inventoryValueByCategory: Array<{ name: string; value: number }>;
-    revenueByCategory: Array<{ name: string; value: number }>;
-  }>({
-    categoryDonut: [],
-    top7Products: [],
-    inventoryValueByCategory: [],
-    revenueByCategory: [],
-  });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<InventoryChartData>(
+    () =>
+      inventoryChartsService.getCachedChartData() || {
+        categoryDonut: [],
+        top7Products: [],
+        inventoryValueByCategory: [],
+        revenueByCategory: [],
+      }
+  );
+  const [loading, setLoading] = useState(
+    () => inventoryChartsService.getCachedChartData() === null
+  );
   const tr = T[language] as ChartsT;
   const isRTL = isRTLLang(language);
 
@@ -575,31 +582,52 @@ export default function InventoryCharts(): React.JSX.Element {
     };
   }, []);
 
-  // Fetch data from Supabase
-  const fetchCharts = async () => {
+  // Load local SQLite data first. A remote refresh follows without blocking it.
+  const fetchCharts = async (syncOnline = false): Promise<void> => {
     try {
-      setLoading(true);
       const result = await inventoryChartsService.getChartData();
       setData(result);
-    } catch (err: any) {
-      console.error('Failed to load inventory charts:', err.message);
+    } catch (error) {
+      console.error('Failed to load local inventory charts:', error);
     } finally {
       setLoading(false);
+    }
+
+    if (syncOnline && navigator.onLine) {
+      try {
+        const result = await inventoryChartsService.syncChartData();
+        setData(result);
+      } catch (error) {
+        console.error('Failed to sync inventory charts:', error);
+      }
     }
   };
 
   useEffect(() => {
-    fetchCharts();
+    void fetchCharts(true);
   }, []);
 
-  // Refresh when inventory or sales change
+  // Local writes and background pulls should update charts without waiting on the network.
   useEffect(() => {
-    const reload = () => fetchCharts();
-    window.addEventListener('zakhira:inventory-updated', reload);
-    window.addEventListener('zakhira:sales-updated', reload);
+    const reloadLocal = (): void => {
+      void fetchCharts();
+    };
+    const syncOnline = (): void => {
+      void fetchCharts(true);
+    };
+    window.addEventListener('zakhira:inventory-updated', reloadLocal);
+    window.addEventListener('zakhira:sales-updated', reloadLocal);
+    window.addEventListener('zakhira:products-synced', reloadLocal);
+    window.addEventListener('zakhira:records-synced', reloadLocal);
+    window.addEventListener('online', syncOnline);
+    window.addEventListener('focus', syncOnline);
     return () => {
-      window.removeEventListener('zakhira:inventory-updated', reload);
-      window.removeEventListener('zakhira:sales-updated', reload);
+      window.removeEventListener('zakhira:inventory-updated', reloadLocal);
+      window.removeEventListener('zakhira:sales-updated', reloadLocal);
+      window.removeEventListener('zakhira:products-synced', reloadLocal);
+      window.removeEventListener('zakhira:records-synced', reloadLocal);
+      window.removeEventListener('online', syncOnline);
+      window.removeEventListener('focus', syncOnline);
     };
   }, []);
 

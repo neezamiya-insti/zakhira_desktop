@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from '../pages/auth/LoginPage';
+import ResetPasswordPage from '../pages/auth/ResetPasswordPage';
 import MainLayout from '../layouts/MainLayout';
 
 const getStoredUser = (): { email?: string } | null => {
@@ -65,6 +66,7 @@ export default function AppRoutes(): React.JSX.Element {
   return (
     <Routes>
       <Route path="/" element={<Navigate to={isAuthenticated() ? '/dashboard' : '/login'} replace />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
 
       <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>

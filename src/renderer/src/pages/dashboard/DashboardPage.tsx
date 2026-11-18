@@ -9,6 +9,10 @@ import {
   dashboardService,
   type DashboardStats,
 } from '@renderer/services/dashboardservice';
+import { ACCOUNTING_SYNCED_EVENT } from '@renderer/services/accountingservice';
+import { ORDERS_SYNCED_EVENT } from '@renderer/services/orderservice';
+import { PRODUCTS_SYNCED_EVENT } from '@renderer/services/productService';
+import { RECORDS_SYNCED_EVENT } from '@renderer/services/recordsService';
 
 // ============================================================
 // 🎨 THEME — shared brand colors + dashboard-only status colors
@@ -446,7 +450,7 @@ type LowStockProduct = {
 
 type Activity = {
   id: string;
-  type: 'sale' | 'purchase' | 'payment' | 'stock';
+  type: 'sale' | 'purchase' | 'payment' | 'return' | 'stock';
   message: string;
   time: string;
 };
@@ -994,8 +998,12 @@ export default function DashboardPage(): React.JSX.Element {
     (user.language as Language) || 'en'
   );
 
-  const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>(
+    () => dashboardService.getCachedDashboardData() ?? EMPTY_STATS
+  );
+  const [loading, setLoading] = useState(
+    () => dashboardService.getCachedDashboardData() === null
+  );
   const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   useEffect(() => {
@@ -1016,27 +1024,65 @@ export default function DashboardPage(): React.JSX.Element {
   };
 
   const refresh = async (silent = false): Promise<void> => {
+    let localLoaded = false;
     try {
-      const fresh = await dashboardService.getDashboardData();
-      setStats(fresh);
-    } catch (err) {
-      // Background refreshes only log; the first load shows the popup
-      if (silent) console.error('[Dashboard] background refresh failed', err);
-      else reportError(tr.errLoadDashboard, err);
+      try {
+        const local = await dashboardService.getLocalDashboardData();
+        setStats(local);
+        setErrorInfo(null);
+        localLoaded = true;
+      } catch (err) {
+        if (!navigator.onLine) {
+          if (silent) console.error('[Dashboard] offline refresh failed', err);
+          else reportError(tr.errLoadDashboard, err);
+        }
+      }
+
+      if (navigator.onLine) {
+        try {
+          const fresh = await dashboardService.getDashboardData();
+          setStats(fresh);
+          setErrorInfo(null);
+        } catch (err) {
+          if (silent || localLoaded) {
+            console.error('[Dashboard] background refresh failed', err);
+          } else {
+            reportError(tr.errLoadDashboard, err);
+          }
+        }
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial load + refresh on window focus / sales update
+  // Initial local render, then online sync; refresh local data after app changes.
   useEffect(() => {
-    void refresh(false);
-    const bg = (): void => void refresh(true);
+    const hasSnapshot = dashboardService.getCachedDashboardData() !== null;
+    void refresh(hasSnapshot);
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const bg = (): void => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => void refresh(true), 100);
+    };
     window.addEventListener('focus', bg);
+    window.addEventListener('online', bg);
     window.addEventListener('zakhira:sales-updated', bg);
+    window.addEventListener(RECORDS_SYNCED_EVENT, bg);
+    window.addEventListener(ACCOUNTING_SYNCED_EVENT, bg);
+    window.addEventListener(ORDERS_SYNCED_EVENT, bg);
+    window.addEventListener(PRODUCTS_SYNCED_EVENT, bg);
+    window.addEventListener('zakhira:inventory-updated', bg);
     return () => {
       window.removeEventListener('focus', bg);
+      window.removeEventListener('online', bg);
       window.removeEventListener('zakhira:sales-updated', bg);
+      window.removeEventListener(RECORDS_SYNCED_EVENT, bg);
+      window.removeEventListener(ACCOUNTING_SYNCED_EVENT, bg);
+      window.removeEventListener(ORDERS_SYNCED_EVENT, bg);
+      window.removeEventListener(PRODUCTS_SYNCED_EVENT, bg);
+      window.removeEventListener('zakhira:inventory-updated', bg);
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1091,6 +1137,8 @@ export default function DashboardPage(): React.JSX.Element {
         return Icons.package;
       case 'payment':
         return Icons.creditCard;
+      case 'return':
+        return Icons.document;
       case 'stock':
         return Icons.alert;
       default:
@@ -1127,16 +1175,6 @@ export default function DashboardPage(): React.JSX.Element {
       trend: 'up',
       icon: Icons.creditCard,
       bg: THEME.mutedOlive,
-      path: '/accounting',
-    },
-    {
-      id: 'receivables',
-      label: tr.receivables,
-      value: fmt(data.receivables),
-      change: '',
-      trend: 'down',
-      icon: Icons.invoice,
-      bg: THEME.charcoal,
       path: '/accounting',
     },
     {
@@ -1199,7 +1237,7 @@ export default function DashboardPage(): React.JSX.Element {
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate('/sales')}
-            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
+            className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all duration-300 hover:-translate-y-0.5 flex items-center gap-1.5"
             style={{
               background: THEME.warmBrass,
               color: THEME.warmIvory,
@@ -1220,7 +1258,7 @@ export default function DashboardPage(): React.JSX.Element {
       </div>
 
       {/* STAT CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2.5 mb-3">
         {STATS.map((stat) => (
           <button
             key={stat.id}

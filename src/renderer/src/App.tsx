@@ -1,7 +1,96 @@
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AppRoutes from './routes/AppRoutes';
 import { supabase } from './lib/supabaseClient';
+
+function PasswordRecoveryLinkHandler(): null {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+
+    const processRecoveryLink = async (deepLink: string): Promise<void> => {
+      if (!active) return;
+
+      try {
+        const url = new URL(deepLink);
+        const query = url.searchParams;
+        const hash = new URLSearchParams(url.hash.slice(1));
+        const errorDescription =
+          query.get('error_description') || hash.get('error_description');
+
+        if (errorDescription) {
+          navigate('/reset-password', {
+            replace: true,
+            state: { recoveryError: 'invalid_link' },
+          });
+          return;
+        }
+
+        const code = query.get('code');
+        const accessToken = hash.get('access_token');
+        const refreshToken = hash.get('refresh_token');
+        const recoveryType = query.get('type') || hash.get('type');
+
+        if (recoveryType && recoveryType !== 'recovery') {
+          navigate('/reset-password', {
+            replace: true,
+            state: { recoveryError: 'invalid_link' },
+          });
+          return;
+        }
+
+        const { error } = code
+          ? await supabase.auth.exchangeCodeForSession(code)
+          : accessToken && refreshToken
+            ? await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              })
+            : { error: new Error('Recovery link has no session credentials') };
+
+        if (!active) return;
+
+        navigate('/reset-password', {
+          replace: true,
+          state: { recoveryError: error ? 'invalid_link' : undefined },
+        });
+      } catch (error) {
+        console.error('Could not process password recovery link:', error);
+        if (active) {
+          navigate('/reset-password', {
+            replace: true,
+            state: { recoveryError: 'invalid_link' },
+          });
+        }
+      }
+    };
+
+    const unsubscribe = window.electronAPI.onAuthDeepLink((url) => {
+      void processRecoveryLink(url);
+    });
+
+    const pendingLinkTimer = window.setTimeout(() => {
+      void window.electronAPI
+        .getPendingAuthDeepLink()
+        .then((url) => {
+          if (url) void processRecoveryLink(url);
+        })
+        .catch((error: unknown) => {
+          console.error('Could not retrieve password recovery link:', error);
+        });
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(pendingLinkTimer);
+      unsubscribe();
+    };
+  }, [navigate]);
+
+  return null;
+}
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState('');
@@ -64,6 +153,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <>
+      <PasswordRecoveryLinkHandler />
       {showPopup && (
         <div
           style={{

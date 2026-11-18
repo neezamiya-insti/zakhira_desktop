@@ -8,6 +8,8 @@ import { THEME } from '@renderer/theme/theme';
 import { customerService } from '@renderer/services/customerService';
 import {
   salesService,
+  SALES_SYNCED_EVENT,
+  SALES_SYNC_ERROR_EVENT,
   type SalesDocumentInput,
 } from '@renderer/services/salesService';
 import {
@@ -15,6 +17,7 @@ import {
   type Product as DbProduct,
   type Category as DbCategory,
 } from '@renderer/services/productService';
+import { orderService } from '@renderer/services/orderservice';
 // ✅ Import the independent sibling — NO PROPS PASSED
 import RecordsSection from './RecordsSection';
 
@@ -53,6 +56,7 @@ const t = {
     item: 'Item',
     product: 'Product',
     quantity: 'Quantity',
+    unit: 'unit',
     unitPrice: 'Unit Price',
     discount: 'Discount (%)',
     lineTotal: 'Line Total',
@@ -95,6 +99,12 @@ const t = {
     errLines: 'Add at least one product with a quantity',
     errOtherPay: 'Enter how the customer paid',
     errStorage: 'Could not save — storage may be full.',
+    errOfflineQuotation: 'Connect to the internet to send this quotation via WhatsApp.',
+    errQuoteNumber: 'Could not reserve a unique quotation number online.',
+    offlineQuotationWhatsappError: (n: string) =>
+      `Saved offline — ${n}. The PDF was downloaded, but WhatsApp needs internet.`,
+    quoteNumberLocalWarning: (n: string) =>
+      `Saved locally as ${n}; online number reservation failed. PDF downloaded and WhatsApp was not opened.`,
     errAmountTooHigh: 'Amount received cannot be greater than the Grand Total.',
     toastInvoice: (n: string) => `Invoice created — ${n}`,
     toastQuotation: (n: string) => `Saved as Quotation — ${n}`,
@@ -115,10 +125,6 @@ const t = {
     errPhoneInvalid: 'Enter phone with country code, e.g. +966 50 123 4567',
     errEmailInvalid: 'Enter a valid email address',
     toastCustomerAdded: (n: string) => `Customer added — ${n}`,
-    // ✅ Two phone inputs (same logic as Customers page)
-    phoneIntlLabel: 'Phone (with country code)',
-    phoneLocalLabel: 'Phone (without country code)',
-    phoneEitherHint: 'Fill at least one phone number. Each number must be unique.',
     errPhoneEither: 'Enter at least one phone number',
     errDuplicatePhone: (n: string) =>
       `This phone number already belongs to ${n}. Each phone number must be unique.`,
@@ -179,6 +185,13 @@ const t = {
     vatAmountShort: 'VAT',
     amountCol: 'Amount',
     totalVatLabel: 'Total VAT',
+    // ✅ Online / offline handling
+    onlineBadge: 'Online',
+    offlineBadge: 'Offline — saving locally',
+    pendingSync: (n: number) => `${n} waiting to sync`,
+    syncErrorPrefix: 'Sync problem',
+    offlineInvoiceSaved: (n: string) =>
+      `Saved offline — ${n}. It will sync when internet returns.`,
   },
   ar: {
     pageTitle: 'المبيعات - فاتورة / عرض سعر',
@@ -209,6 +222,7 @@ const t = {
     item: 'عنصر',
     product: 'المنتج',
     quantity: 'الكمية',
+    unit: 'وحدة',
     unitPrice: 'سعر الوحدة',
     discount: 'الخصم (%)',
     lineTotal: 'إجمالي السطر',
@@ -251,6 +265,12 @@ const t = {
     errLines: 'أضف منتجاً واحداً على الأقل مع الكمية',
     errOtherPay: 'أدخل كيف دفع العميل',
     errStorage: 'تعذر الحفظ — قد تكون مساحة التخزين ممتلئة.',
+    errOfflineQuotation: 'اتصل بالإنترنت لإرسال عرض السعر عبر واتساب.',
+    errQuoteNumber: 'تعذر حجز رقم عرض سعر فريد عبر الإنترنت.',
+    offlineQuotationWhatsappError: (n: string) =>
+      `تم الحفظ دون اتصال — ${n}. تم تنزيل PDF، لكن واتساب يحتاج إلى الإنترنت.`,
+    quoteNumberLocalWarning: (n: string) =>
+      `تم الحفظ محلياً برقم ${n}؛ تعذر حجز الرقم عبر الإنترنت. تم تنزيل PDF ولم يتم فتح واتساب.`,
     errAmountTooHigh: 'المبلغ المستلم لا يمكن أن يكون أكبر من الإجمالي.',
     toastInvoice: (n: string) => `تم إنشاء الفاتورة — ${n}`,
     toastQuotation: (n: string) => `تم الحفظ كعرض سعر — ${n}`,
@@ -271,9 +291,6 @@ const t = {
     errPhoneInvalid: 'أدخل الهاتف مع رمز الدولة، مثل +966 50 123 4567',
     errEmailInvalid: 'أدخل بريداً إلكترونياً صالحاً',
     toastCustomerAdded: (n: string) => `تمت إضافة العميل — ${n}`,
-    phoneIntlLabel: 'الهاتف (مع رمز الدولة)',
-    phoneLocalLabel: 'الهاتف (بدون رمز الدولة)',
-    phoneEitherHint: 'املأ رقم هاتف واحداً على الأقل. يجب أن يكون كل رقم فريداً.',
     errPhoneEither: 'أدخل رقم هاتف واحداً على الأقل',
     errDuplicatePhone: (n: string) =>
       `رقم الهاتف هذا مسجّل بالفعل للعميل ${n}. يجب أن يكون كل رقم فريداً.`,
@@ -332,6 +349,12 @@ const t = {
     vatAmountShort: 'الضريبة',
     amountCol: 'الإجمالي',
     totalVatLabel: 'إجمالي الضريبة',
+    onlineBadge: 'متصل',
+    offlineBadge: 'غير متصل — الحفظ محلياً',
+    pendingSync: (n: number) => `${n} بانتظار المزامنة`,
+    syncErrorPrefix: 'مشكلة في المزامنة',
+    offlineInvoiceSaved: (n: string) =>
+      `تم الحفظ دون اتصال — ${n}. ستتم المزامنة عند عودة الإنترنت.`,
   },
   ur: {
     pageTitle: 'فروخت - انوائس / کوٹیشن',
@@ -362,6 +385,7 @@ const t = {
     item: 'آئٹم',
     product: 'پروڈکٹ',
     quantity: 'مقدار',
+    unit: 'یونٹ',
     unitPrice: 'یونٹ قیمت',
     discount: 'ڈسکاؤنٹ (%)',
     lineTotal: 'لائن کل',
@@ -404,6 +428,12 @@ const t = {
     errLines: 'کم از کم ایک پروڈکٹ مقدار کے ساتھ شامل کریں',
     errOtherPay: 'درج کریں کسٹمر نے کیسے ادا کیا',
     errStorage: 'محفوظ نہیں ہو سکا — اسٹوریج بھری ہو سکتی ہے۔',
+    errOfflineQuotation: 'واٹس ایپ پر کوٹیشن بھیجنے کے لیے انٹرنیٹ سے منسلک ہوں۔',
+    errQuoteNumber: 'آن لائن منفرد کوٹیشن نمبر حاصل نہیں ہو سکا۔',
+    offlineQuotationWhatsappError: (n: string) =>
+      `آف لائن محفوظ ہو گیا — ${n}۔ PDF ڈاؤن لوڈ ہو گئی، لیکن واٹس ایپ کے لیے انٹرنیٹ چاہیے۔`,
+    quoteNumberLocalWarning: (n: string) =>
+      `مقامی طور پر ${n} کے ساتھ محفوظ ہوا؛ آن لائن نمبر مختص نہیں ہو سکا۔ PDF ڈاؤن لوڈ ہوئی اور واٹس ایپ نہیں کھولا گیا۔`,
     errAmountTooHigh: 'موصول شدہ رقم کل رقم سے زیادہ نہیں ہو سکتی۔',
     toastInvoice: (n: string) => `انوائس بن گئی — ${n}`,
     toastQuotation: (n: string) => `کوٹیشن کے طور پر محفوظ — ${n}`,
@@ -424,9 +454,6 @@ const t = {
     errPhoneInvalid: 'کنٹری کوڈ کے ساتھ فون درج کریں، مثلاً +966 50 123 4567',
     errEmailInvalid: 'درست ای میل درج کریں',
     toastCustomerAdded: (n: string) => `کسٹمر شامل ہو گیا — ${n}`,
-    phoneIntlLabel: 'فون (کنٹری کوڈ کے ساتھ)',
-    phoneLocalLabel: 'فون (کنٹری کوڈ کے بغیر)',
-    phoneEitherHint: 'کم از کم ایک فون نمبر درج کریں۔ ہر نمبر منفرد ہونا چاہیے۔',
     errPhoneEither: 'کم از کم ایک فون نمبر درج کریں',
     errDuplicatePhone: (n: string) =>
       `یہ فون نمبر پہلے ہی ${n} کے پاس ہے۔ ہر فون نمبر منفرد ہونا چاہیے۔`,
@@ -485,6 +512,12 @@ const t = {
     vatAmountShort: 'ویٹ',
     amountCol: 'رقم',
     totalVatLabel: 'کل ویٹ',
+    onlineBadge: 'آن لائن',
+    offlineBadge: 'آف لائن — مقامی طور پر محفوظ ہو رہا ہے',
+    pendingSync: (n: number) => `${n} سنک کے منتظر`,
+    syncErrorPrefix: 'سنک میں مسئلہ',
+    offlineInvoiceSaved: (n: string) =>
+      `آف لائن محفوظ ہو گیا — ${n}۔ انٹرنیٹ آتے ہی سنک ہو جائے گا۔`,
   },
   hi: {
     pageTitle: 'बिक्री - इनवॉइस / कोटेशन',
@@ -515,6 +548,7 @@ const t = {
     item: 'आइटम',
     product: 'उत्पाद',
     quantity: 'मात्रा',
+    unit: 'इकाई',
     unitPrice: 'इकाई मूल्य',
     discount: 'छूट (%)',
     lineTotal: 'लाइन कुल',
@@ -557,6 +591,12 @@ const t = {
     errLines: 'मात्रा के साथ कम से कम एक उत्पाद जोड़ें',
     errOtherPay: 'दर्ज करें कि ग्राहक ने कैसे भुगतान किया',
     errStorage: 'सहेजा नहीं जा सका — स्टोरेज भरा हो सकता है।',
+    errOfflineQuotation: 'व्हाट्सएप पर कोटेशन भेजने के लिए इंटरनेट से जुड़ें।',
+    errQuoteNumber: 'ऑनलाइन एक विशिष्ट कोटेशन नंबर आरक्षित नहीं हो सका।',
+    offlineQuotationWhatsappError: (n: string) =>
+      `ऑफ़लाइन सेव हुआ — ${n}। PDF डाउनलोड हुई, लेकिन व्हाट्सएप के लिए इंटरनेट चाहिए।`,
+    quoteNumberLocalWarning: (n: string) =>
+      `स्थानीय रूप से ${n} के नाम से सहेजा गया; ऑनलाइन नंबर आरक्षित नहीं हुआ। PDF डाउनलोड हुई और व्हाट्सएप नहीं खोला गया।`,
     errAmountTooHigh: 'प्राप्त राशि कुल योग से अधिक नहीं हो सकती।',
     toastInvoice: (n: string) => `इनवॉइस बन गई — ${n}`,
     toastQuotation: (n: string) => `कोटेशन के रूप में सहेजा गया — ${n}`,
@@ -577,9 +617,6 @@ const t = {
     errPhoneInvalid: 'देश कोड के साथ फ़ोन दर्ज करें, जैसे +966 50 123 4567',
     errEmailInvalid: 'मान्य ईमेल दर्ज करें',
     toastCustomerAdded: (n: string) => `ग्राहक जोड़ा गया — ${n}`,
-    phoneIntlLabel: 'फ़ोन (देश कोड के साथ)',
-    phoneLocalLabel: 'फ़ोन (बिना देश कोड)',
-    phoneEitherHint: 'कम से कम एक फ़ोन नंबर भरें। हर नंबर अनोखा होना चाहिए।',
     errPhoneEither: 'कम से कम एक फ़ोन नंबर दर्ज करें',
     errDuplicatePhone: (n: string) =>
       `यह फ़ोन नंबर पहले से ${n} के पास है। हर फ़ोन नंबर अनोखा होना चाहिए।`,
@@ -638,6 +675,12 @@ const t = {
     vatAmountShort: 'वैट',
     amountCol: 'राशि',
     totalVatLabel: 'कुल वैट',
+    onlineBadge: 'ऑनलाइन',
+    offlineBadge: 'ऑफ़लाइन — लोकल सेव हो रहा है',
+    pendingSync: (n: number) => `${n} सिंक के इंतज़ार में`,
+    syncErrorPrefix: 'सिंक में समस्या',
+    offlineInvoiceSaved: (n: string) =>
+      `ऑफ़लाइन सेव हुआ — ${n}। इंटरनेट आते ही सिंक हो जाएगा।`,
   },
 } as const;
 
@@ -657,11 +700,12 @@ type Customer = {
   id: string;
   name: string;
   company: string;
-  /** Phone WITH country code (validated). May be empty if phoneAlt is filled. */
+  /** Primary phone number; phoneAlt remains for legacy customer rows. */
   phone: string;
-  /** Phone WITHOUT country code (no validation). */
+  /** Legacy alternate phone retained for older customer rows. */
   phoneAlt?: string;
   email?: string;
+  vatNumber?: string;
   address: string;
   city: string;
   createdAt: string;
@@ -718,7 +762,7 @@ type DocumentRecord = {
   customerSnapshot: CustomerSnapshot;
   issueDate: string;
   dueDate?: string;
-  salesChannel?: 'Online' | 'Offline';
+  salesChannel: 'Online' | 'Offline';
   tenantId?: string;
   updatedAt?: string;
   status: WorkflowStatus;
@@ -761,6 +805,7 @@ type InventoryProduct = {
   stock: number;
   lowStockLevel: number;
   images: string[];
+  unitId: string;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -776,6 +821,7 @@ type CustomerRow = {
   email?: string | null;
   phone?: string | null;
   phone_alt?: string | null;
+  vat_number?: string | null;
   address?: string | null;
   city?: string | null;
   created_at: string;
@@ -913,13 +959,14 @@ const Icons = {
 // ============================================================
 const HISTORY_KEY = 'zakhira_sales_status_history';
 const DRAFT_KEY = 'zakhira_invoice_draft';
-// Same key the Products page uses (backend has no images column yet)
+// Legacy image map is kept as a fallback for older installs.
 const IMAGES_KEY = 'zakhira_product_images';
 const DEFAULT_VAT_RATE = 15;
 const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Bank Transfer', 'Card', 'Other'];
 const CUSTOMER_ROW_H = 44;
 const CUSTOMER_VISIBLE_ROWS = 6;
 const INTL_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+const PENDING_REFRESH_MS = 4000;
 
 const uid = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -948,6 +995,16 @@ const normalizePhone = (raw: string): string => {
   let s = (raw || '').trim().replace(/[\s\-().]/g, '');
   if (s.startsWith('00')) s = `+${s.slice(2)}`;
   return s;
+};
+
+const normalizeCustomerPhone = (raw: string): string => {
+  const phone = normalizePhone(raw);
+  if (!phone) return '';
+  if (phone.startsWith('+')) return phone;
+  const digits = phoneDigits(phone);
+  if (!digits) return '';
+  if (digits.startsWith('966')) return `+${digits}`;
+  return `+966${digits.startsWith('0') ? digits.slice(1) : digits}`;
 };
 
 /**
@@ -1044,7 +1101,6 @@ const EMPTY_CUSTOMER = {
   name: '',
   company: '',
   phone: '',
-  phoneAlt: '',
   email: '',
   city: '',
   address: '',
@@ -1071,6 +1127,7 @@ const toUiCustomer = (r: CustomerRow): Customer => ({
   company: r.company || '',
   phone: r.phone || '',
   phoneAlt: r.phone_alt || '',
+  vatNumber: r.vat_number || '',
   email: r.email || '',
   address: r.address || '',
   city: r.city || '',
@@ -1080,7 +1137,8 @@ const toUiCustomer = (r: CustomerRow): Customer => ({
 
 const toInventoryProduct = (
   p: DbProduct,
-  cats: DbCategory[]
+  cats: DbCategory[],
+  thumbnails: Record<string, string>
 ): InventoryProduct => ({
   id: p.id,
   sku: p.sku,
@@ -1089,7 +1147,8 @@ const toInventoryProduct = (
   price: Number(p.price),
   stock: Number(p.stock),
   lowStockLevel: Number(p.low_stock_level),
-  images: getProductImages(p.id),
+  images: thumbnails[p.id] ? [thumbnails[p.id]] : getProductImages(p.id),
+  unitId: p.unit_id,
   active: p.active,
   createdAt: p.created_at,
   updatedAt: p.updated_at,
@@ -1108,10 +1167,10 @@ const toServiceInput = (
   customerName: r.customerSnapshot.name,
   customerCompany: r.customerSnapshot.company,
   customerPhone: r.customerSnapshot.phone,
-  customerPhoneAlt: r.customerSnapshot.phoneAlt,
   customerEmail: r.customerSnapshot.email,
   customerAddress: r.customerSnapshot.address,
   customerCity: r.customerSnapshot.city,
+  salesChannel: r.salesChannel,
   issueDate: r.issueDate,
   dueDate: r.dueDate,
   status: r.status,
@@ -1472,7 +1531,6 @@ td.n{text-align:${endSide};white-space:nowrap}
     ${snap.company ? `<div>${escHtml(snap.company)}</div>` : ''}
     ${cityLine ? `<div>${escHtml(cityLine)}</div>` : ''}
     ${snap.phone ? `<div dir="ltr" style="text-align:${startSide}">${escHtml(snap.phone)}</div>` : ''}
-    ${snap.phoneAlt ? `<div dir="ltr" style="text-align:${startSide}">${escHtml(snap.phoneAlt)}</div>` : ''}
     ${snap.email ? `<div dir="ltr" style="text-align:${startSide}">${escHtml(snap.email)}</div>` : ''}
     ${record.vatNumber ? `<div>${escHtml(tr.vatNumber)}: <b>${escHtml(record.vatNumber)}</b></div>` : ''}
   </div>
@@ -1837,10 +1895,10 @@ function CustomerPicker({
 
 // ============================================================
 // QUICK ADD CUSTOMER MODAL
-// 2 phone inputs (with / without country code), at least one required,
-// phone must be unique. Saved to the backend via customerService.
+// One unique phone number is saved via customerService.
 // ============================================================
-type QuickErrors = Partial<Record<keyof typeof EMPTY_CUSTOMER | 'phoneGroup', string>>;
+type QuickCustomerForm = typeof EMPTY_CUSTOMER & { vatNumber: string };
+type QuickErrors = Partial<Record<keyof QuickCustomerForm, string>>;
 
 function QuickCustomerModal({
   tr,
@@ -1853,7 +1911,10 @@ function QuickCustomerModal({
   onClose: () => void;
   onSaved: (c: Customer) => void;
 }): React.JSX.Element {
-  const [form, setForm] = useState({ ...EMPTY_CUSTOMER });
+  const [form, setForm] = useState<QuickCustomerForm>({
+    ...EMPTY_CUSTOMER,
+    vatNumber: '',
+  });
   const [errors, setErrors] = useState<QuickErrors>({});
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1866,7 +1927,7 @@ function QuickCustomerModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const set = (k: keyof typeof EMPTY_CUSTOMER, v: string): void =>
+  const set = (k: keyof QuickCustomerForm, v: string): void =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const submit = async (): Promise<void> => {
@@ -1874,29 +1935,18 @@ function QuickCustomerModal({
     const e: QuickErrors = {};
     if (!form.name.trim()) e.name = tr.errName;
 
-    const intl = normalizePhone(form.phone);
-    const alt = normalizePhone(form.phoneAlt);
-
-    // At least ONE of the two phone fields is required
-    if (!intl && !alt) {
-      e.phoneGroup = tr.errPhoneEither;
-    } else if (intl && !INTL_PHONE_REGEX.test(intl)) {
-      // Only the "with country code" field is validated
-      e.phone = tr.errPhoneInvalid;
-    }
+    const phone = normalizeCustomerPhone(form.phone);
+    if (!phone) e.phone = tr.errPhoneEither;
+    else if (!INTL_PHONE_REGEX.test(phone)) e.phone = tr.errPhoneInvalid;
 
     if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       e.email = tr.errEmailInvalid;
     }
 
     // 🔒 UNIQUE PHONE — checked against the loaded customers list
-    if (intl && !e.phone) {
-      const dup = customers.find((c) => phoneKeysOf(c).some((k) => samePhone(k, intl)));
+    if (phone && !e.phone) {
+      const dup = customers.find((c) => phoneKeysOf(c).some((k) => samePhone(k, phone)));
       if (dup) e.phone = tr.errDuplicatePhone(dup.name);
-    }
-    if (alt) {
-      const dup = customers.find((c) => phoneKeysOf(c).some((k) => samePhone(k, alt)));
-      if (dup) e.phoneAlt = tr.errDuplicatePhone(dup.name);
     }
 
     setErrors(e);
@@ -1909,8 +1959,9 @@ function QuickCustomerModal({
         name: form.name.trim(),
         company: form.company.trim() || null,
         email: form.email.trim() || null,
-        phone: intl || null,
-        phone_alt: alt || null,
+        phone,
+        phone_alt: null,
+        vat_number: form.vatNumber.trim() || null,
         address: form.address.trim() || null,
         city: form.city.trim() || null,
       });
@@ -1981,51 +2032,30 @@ function QuickCustomerModal({
                 className={fieldCls}
               />
             </div>
+            <div>
+              <label className={labelCls}>{tr.vatNumber}</label>
+              <input
+                value={form.vatNumber}
+                onChange={(e) => set('vatNumber', e.target.value)}
+                placeholder={tr.enterVat}
+                className={fieldCls}
+              />
+            </div>
 
-            {/* PHONE — two inputs, at least one is required */}
-            <div className="sm:col-span-2">
+            <div>
               <label className={labelCls}>
                 {tr.phone} <span style={{ color: THEME.warmBrass }}>*</span>
               </label>
-              <p className="mb-2 px-2 text-[9px]" style={{ color: THEME.mutedOlive }}>
-                {tr.phoneEitherHint}
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelCls} style={{ color: THEME.mutedOlive }}>
-                    {tr.phoneIntlLabel}
-                  </label>
-                  <input
-                    type="tel"
-                    dir="ltr"
-                    value={form.phone}
-                    onChange={(e) => set('phone', e.target.value)}
-                    placeholder="+966 50 123 4567"
-                    className={`${fieldCls} font-mono text-start`}
-                  />
-                  {errors.phone && (
-                    <p className={errCls} style={{ color: THEME.warmBrass }}>{errors.phone}</p>
-                  )}
-                </div>
-                <div>
-                  <label className={labelCls} style={{ color: THEME.mutedOlive }}>
-                    {tr.phoneLocalLabel}
-                  </label>
-                  <input
-                    type="tel"
-                    dir="ltr"
-                    value={form.phoneAlt}
-                    onChange={(e) => set('phoneAlt', e.target.value)}
-                    placeholder="0501234567"
-                    className={`${fieldCls} font-mono text-start`}
-                  />
-                  {errors.phoneAlt && (
-                    <p className={errCls} style={{ color: THEME.warmBrass }}>{errors.phoneAlt}</p>
-                  )}
-                </div>
-              </div>
-              {errors.phoneGroup && (
-                <p className={errCls} style={{ color: THEME.warmBrass }}>{errors.phoneGroup}</p>
+              <input
+                type="tel"
+                dir="ltr"
+                value={form.phone}
+                onChange={(e) => set('phone', e.target.value)}
+                placeholder="+966 50 123 4567"
+                className={`${fieldCls} font-mono text-start`}
+              />
+              {errors.phone && (
+                <p className={errCls} style={{ color: THEME.warmBrass }}>{errors.phone}</p>
               )}
             </div>
 
@@ -2276,10 +2306,12 @@ function PdfReadyModal({
   tr,
   data,
   onClose,
+  onOffline,
 }: {
   tr: Translations;
   data: PdfReady;
   onClose: () => void;
+  onOffline: () => void;
 }): React.JSX.Element {
   const shareAvailable = canSharePdf(data.blob, data.filename);
 
@@ -2292,11 +2324,19 @@ function PdfReadyModal({
   }, [onClose]);
 
   const handleShare = async (): Promise<void> => {
+    if (!navigator.onLine) {
+      onOffline();
+      return;
+    }
     const r = await sharePdfFile(data.blob, data.filename, data.text);
     if (r === 'shared') onClose();
   };
 
   const handleDownloadAndOpen = (): void => {
+    if (!navigator.onLine) {
+      onOffline();
+      return;
+    }
     downloadBlob(data.blob, data.filename);
     openWhatsAppChat(data.phone, data.text);
   };
@@ -2451,6 +2491,7 @@ export default function InvoicePage(): React.JSX.Element {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [documents, setDocuments] = useState<{ orderNumber: string }[]>([]);
   const [inventoryProducts, setInventoryProducts] = useState<InventoryProduct[]>([]);
+  const [unitLabels, setUnitLabels] = useState<Record<string, string>>({});
 
   const [customerId, setCustomerId] = useState('');
   const [customer, setCustomer] = useState({ ...EMPTY_CUSTOMER });
@@ -2486,28 +2527,36 @@ export default function InvoicePage(): React.JSX.Element {
   const [previewType, setPreviewType] = useState<DocumentType>('invoice');
   const [previewBusy, setPreviewBusy] = useState(false);
 
+  // ✅ Online / offline + sync status
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncError, setSyncError] = useState('');
+
   const showSuccess = (msg: string, ms = 3000): void => {
     setSuccessMsg(msg);
     setErrorMsg('');
     setTimeout(() => setSuccessMsg(''), ms);
   };
 
-  const showError = (msg: string): void => {
+  const showError = (msg: string, ms = 3500): void => {
     setErrorMsg(msg);
     setSuccessMsg('');
-    setTimeout(() => setErrorMsg(''), 3500);
+    setTimeout(() => setErrorMsg(''), ms);
   };
 
   // ============================================================
-  // LOAD FROM BACKEND
+  // LOAD FROM LOCAL DB (works offline — salesService reads SQLite)
   // ============================================================
   const loadData = async (): Promise<void> => {
     try {
-      const [custRows, docRows, prodRows, cats] = await Promise.all([
+      const [custRows, docRows, prodRows, cats, thumbnails] = await Promise.all([
         customerService.getCustomers(),
         salesService.getDocuments(),
         productService.getProducts(),
         productService.getCategories(),
+        productService.getThumbnails(),
       ]);
       setCustomers(((custRows || []) as CustomerRow[]).map(toUiCustomer));
       setDocuments(
@@ -2516,15 +2565,71 @@ export default function InvoicePage(): React.JSX.Element {
         }))
       );
       setInventoryProducts(
-        prodRows.filter((p) => p.active).map((p) => toInventoryProduct(p, cats))
+        prodRows.filter((p) => p.active).map((p) => toInventoryProduct(p, cats, thumbnails))
       );
     } catch (e) {
       showError(errMsg(e, tr.errStorage));
     }
   };
 
+  const refreshPending = async (): Promise<void> => {
+    try {
+      setPendingCount(await salesService.getPendingCount());
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
     void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void orderService
+      .getMeasuringUnits()
+      .then((units) =>
+        setUnitLabels(
+          Object.fromEntries(units.map((unit) => [unit.id, unit.label || unit.name]))
+        )
+      )
+      .catch((e) => showError(errMsg(e, tr.errStorage)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ Background sync + online/offline tracking
+  useEffect(() => {
+    salesService.startSyncWorker(); // idempotent
+
+    const goOnline = (): void => {
+      setIsOnline(true);
+      void salesService.syncNow();
+    };
+    const goOffline = (): void => setIsOnline(false);
+    const onSynced = (): void => {
+      setSyncError('');
+      void loadData(); // new order numbers / stock / customers
+      void refreshPending();
+    };
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent<{ message?: string }>).detail;
+      setSyncError(d?.message || 'Unknown error');
+    };
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    window.addEventListener(SALES_SYNCED_EVENT, onSynced);
+    window.addEventListener(SALES_SYNC_ERROR_EVENT, onSyncError);
+    const timer = setInterval(() => void refreshPending(), PENDING_REFRESH_MS);
+    void refreshPending();
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener(SALES_SYNCED_EVENT, onSynced);
+      window.removeEventListener(SALES_SYNC_ERROR_EVENT, onSyncError);
+      clearInterval(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2600,24 +2705,22 @@ export default function InvoicePage(): React.JSX.Element {
   // HANDLERS
   // ============================================================
   const applyCustomer = (c: Customer): void => {
-    // Old single-phone records may hold a local number in `phone`
-    const p = c.phone || '';
-    const isIntl = INTL_PHONE_REGEX.test(normalizePhone(p));
     setCustomerId(c.id);
     setCustomer({
       name: c.name,
       company: c.company,
-      phone: isIntl ? p : '',
-      phoneAlt: c.phoneAlt || (isIntl ? '' : p),
+      phone: c.phone || c.phoneAlt || '',
       email: c.email || '',
       city: c.city,
       address: c.address,
     });
+    setVatNumber(c.vatNumber || '');
   };
 
   const handleClearCustomer = (): void => {
     setCustomerId('');
     setCustomer({ ...EMPTY_CUSTOMER });
+    setVatNumber('');
   };
 
   const setCustomerField = (key: keyof typeof EMPTY_CUSTOMER, value: string): void =>
@@ -2680,11 +2783,9 @@ export default function InvoicePage(): React.JSX.Element {
   const validate = (): string | null => {
     if (!customer.name.trim()) return tr.errName;
 
-    // ✅ At least one phone, "with country code" is validated
-    const intl = normalizePhone(customer.phone);
-    const alt = normalizePhone(customer.phoneAlt);
-    if (!intl && !alt) return tr.errPhoneEither;
-    if (intl && !INTL_PHONE_REGEX.test(intl)) return tr.errPhoneInvalid;
+    const phone = normalizeCustomerPhone(customer.phone);
+    if (!phone) return tr.errPhoneEither;
+    if (!INTL_PHONE_REGEX.test(phone)) return tr.errPhoneInvalid;
 
     if (!issueDate) return tr.errDate;
     const validLines = computedLines.filter(
@@ -2705,22 +2806,17 @@ export default function InvoicePage(): React.JSX.Element {
   const buildRecord = (
     type: DocumentType,
     docs: { orderNumber: string }[],
-    resolvedCustomerId?: string
+    resolvedCustomerId?: string,
+    reservedOrderNumber?: string
   ): DocumentRecord => {
     const user = getCurrentUser();
     const hasPayment = received > 0;
     const nowIso = new Date().toISOString();
 
-    // Primary phone = with-code number, else the other one (keeps other
-    // modules working: they always read snapshot.phone)
-    const intl = normalizePhone(customer.phone);
-    const alt = normalizePhone(customer.phoneAlt);
-
     const snapshot: CustomerSnapshot = {
       name: customer.name.trim(),
       company: customer.company.trim(),
-      phone: intl || alt,
-      phoneAlt: intl ? alt : '',
+      phone: normalizeCustomerPhone(customer.phone),
       email: customer.email.trim(),
       address: customer.address.trim(),
       city: customer.city.trim(),
@@ -2742,12 +2838,13 @@ export default function InvoicePage(): React.JSX.Element {
     return {
       id: uid('doc'),
       documentType: type,
-      orderNumber: generateOrderNumber(type, docs),
+      orderNumber: reservedOrderNumber || generateOrderNumber(type, docs),
       customerId: resolvedCustomerId ?? (customerId || 'manual'),
       customerSnapshot: snapshot,
       issueDate,
       dueDate: issueDate,
-      salesChannel: 'Online',
+      // ✅ reflects the real connection state at the time of creation
+      salesChannel: navigator.onLine ? 'Online' : 'Offline',
       tenantId: getTenantId(),
       updatedAt: nowIso,
       status: hasPayment ? 'Approved' : 'Pending',
@@ -2791,21 +2888,19 @@ export default function InvoicePage(): React.JSX.Element {
 
   /**
    * Links the typed customer to an existing one (same phone, any format)
-   * or creates a new customer in the backend.
+   * or creates a new customer (local first, synced later by customerService).
    * Returns the customer id (uuid) or null if there is none.
    */
   const saveCustomerIfNew = async (): Promise<string | null> => {
     if (customerId) return customerId;
     if (!customer.name.trim()) return null;
 
-    const intl = normalizePhone(customer.phone);
-    const alt = normalizePhone(customer.phoneAlt);
-    const mine = [intl, alt].filter(Boolean);
-    if (mine.length === 0) return null;
+    const phone = normalizeCustomerPhone(customer.phone);
+    if (!phone) return null;
 
     // 🔒 never create a duplicate phone — link to the existing customer
     const existing = customers.find((c) =>
-      phoneKeysOf(c).some((k) => mine.some((m) => samePhone(k, m)))
+      phoneKeysOf(c).some((k) => samePhone(k, phone))
     );
     if (existing) return existing.id;
 
@@ -2814,8 +2909,8 @@ export default function InvoicePage(): React.JSX.Element {
         name: customer.name.trim(),
         company: customer.company.trim() || null,
         email: customer.email.trim() || null,
-        phone: intl || null,
-        phone_alt: alt || null,
+        phone,
+        phone_alt: null,
         address: customer.address.trim() || null,
         city: customer.city.trim() || null,
       });
@@ -2900,7 +2995,14 @@ export default function InvoicePage(): React.JSX.Element {
     }
 
     setCustomerId(d.customerId || '');
-    setCustomer({ ...EMPTY_CUSTOMER, ...(d.customer || {}) });
+    const draftCustomer = (d.customer || {}) as Partial<typeof EMPTY_CUSTOMER> & {
+      phoneAlt?: string;
+    };
+    setCustomer({
+      ...EMPTY_CUSTOMER,
+      ...draftCustomer,
+      phone: draftCustomer.phone || draftCustomer.phoneAlt || '',
+    });
     setIssueDate(d.issueDate || todayISO());
     setLines(d.lines.length > 0 ? d.lines : [newLine()]);
     setVatNumber(d.vatNumber || '');
@@ -2971,6 +3073,7 @@ export default function InvoicePage(): React.JSX.Element {
 
     setSending(true);
     try {
+      const online = navigator.onLine;
       const resolvedId = await saveCustomerIfNew();
       const record = buildRecord('invoice', documents, resolvedId ?? undefined);
       const saved = await salesService.createDocument(
@@ -2979,7 +3082,13 @@ export default function InvoicePage(): React.JSX.Element {
 
       finalizeRecord({ ...record, id: saved.id });
       discardDraft();
-      showSuccess(tr.toastInvoice(record.orderNumber));
+      showSuccess(
+        online
+          ? tr.toastInvoice(record.orderNumber)
+          : tr.offlineInvoiceSaved(record.orderNumber),
+        online ? 3000 : 6000
+      );
+      void refreshPending();
       await loadData(); // refresh order numbers + stock
       setTimeout(resetForm, 1500);
     } catch (e) {
@@ -3024,8 +3133,24 @@ export default function InvoicePage(): React.JSX.Element {
 
     setSending(true);
     try {
+      let orderNumber = generateOrderNumber('quotation', documents);
+      let quoteNumberReservationFailed = false;
+      let quoteNumberNeedsSync = true;
+      if (navigator.onLine) {
+        try {
+          orderNumber = await salesService.reserveQuotationNumber();
+          quoteNumberNeedsSync = false;
+        } catch {
+          quoteNumberReservationFailed = true;
+        }
+      }
       const resolvedId = await saveCustomerIfNew();
-      const draftRecord = buildRecord('quotation', documents, resolvedId ?? undefined);
+      const draftRecord = buildRecord(
+        'quotation',
+        documents,
+        resolvedId ?? undefined,
+        orderNumber
+      );
 
       let record: DocumentRecord;
       try {
@@ -3041,6 +3166,7 @@ export default function InvoicePage(): React.JSX.Element {
       finalizeRecord(record);
       discardDraft();
       void loadData();
+      void refreshPending();
 
       const text = [
         tr.waHello(record.customerSnapshot.name),
@@ -3055,28 +3181,43 @@ export default function InvoicePage(): React.JSX.Element {
           buildQuotationHtml(record, tr, getCompanyInfo(), isRTL, language),
           filename
         );
-        showSuccess(tr.toastQuotation(record.orderNumber));
 
-        const stillActive = (
-          navigator as Navigator & { userActivation?: { isActive: boolean } }
-        ).userActivation?.isActive;
-        let delivered = false;
-        if (stillActive) {
-          const r = await sharePdfFile(blob, filename, text);
-          delivered = r === 'shared' || r === 'cancelled';
-        }
-        if (!delivered) {
-          setPdfReady({ blob, filename, phone: record.customerSnapshot.phone, text });
+        if (!navigator.onLine || quoteNumberNeedsSync) {
+          downloadBlob(blob, filename);
+          showError(
+            quoteNumberReservationFailed
+              ? tr.quoteNumberLocalWarning(record.orderNumber)
+              : tr.offlineQuotationWhatsappError(record.orderNumber),
+            7000
+          );
+        } else {
+          showSuccess(tr.toastQuotation(record.orderNumber));
+
+          const stillActive = (
+            navigator as Navigator & { userActivation?: { isActive: boolean } }
+          ).userActivation?.isActive;
+          let delivered = false;
+          if (stillActive) {
+            const r = await sharePdfFile(blob, filename, text);
+            delivered = r === 'shared' || r === 'cancelled';
+          }
+          if (!delivered) {
+            setPdfReady({ blob, filename, phone: record.customerSnapshot.phone, text });
+          }
         }
       } catch {
         showError(tr.errPdf);
-        window.open(
-          `https://wa.me/${phoneDigits(record.customerSnapshot.phone)}?text=${encodeURIComponent(buildWhatsAppText(record))}`,
-          '_blank'
-        );
+        if (navigator.onLine) {
+          window.open(
+            `https://wa.me/${phoneDigits(record.customerSnapshot.phone)}?text=${encodeURIComponent(buildWhatsAppText(record))}`,
+            '_blank'
+          );
+        }
       }
 
       setTimeout(resetForm, 1500);
+    } catch (e) {
+      showError(errMsg(e, tr.errQuoteNumber));
     } finally {
       setSending(false);
     }
@@ -3172,6 +3313,23 @@ export default function InvoicePage(): React.JSX.Element {
             {Icons.reset}
             <span>{tr.resetForm}</span>
           </button>
+
+          {/* ✅ ONLINE / OFFLINE + PENDING SYNC BADGE */}
+          <span
+            className="ms-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold"
+            style={
+              isOnline
+                ? { background: '#dcfce7', color: '#15803d' }
+                : { background: '#fef3c7', color: '#b45309' }
+            }
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ background: isOnline ? '#16a34a' : '#d97706' }}
+            />
+            {isOnline ? tr.onlineBadge : tr.offlineBadge}
+            {pendingCount > 0 && <span>· {tr.pendingSync(pendingCount)}</span>}
+          </span>
         </div>
       </div>
 
@@ -3192,6 +3350,18 @@ export default function InvoicePage(): React.JSX.Element {
           >
             {Icons.alert}
             <span>{errorMsg}</span>
+          </div>
+        )}
+        {/* ✅ REAL SYNC ERROR (not just "offline") */}
+        {syncError && (
+          <div
+            className="mb-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-bold"
+            style={{ background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}
+          >
+            {Icons.alert}
+            <span>
+              {tr.syncErrorPrefix}: {syncError}
+            </span>
           </div>
         )}
 
@@ -3259,26 +3429,14 @@ export default function InvoicePage(): React.JSX.Element {
                   />
                 </div>
 
-                {/* ✅ TWO PHONE INPUTS — at least one required */}
                 <div>
-                  <label className={labelCls}>{tr.phoneIntlLabel}</label>
+                  <label className={labelCls}>{tr.phone}</label>
                   <input
                     type="tel"
                     dir="ltr"
                     value={customer.phone}
                     onChange={(e) => setCustomerField('phone', e.target.value)}
-                    placeholder="+966 50 123 4567"
-                    className={`${fieldCls} text-start`}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{tr.phoneLocalLabel}</label>
-                  <input
-                    type="tel"
-                    dir="ltr"
-                    value={customer.phoneAlt}
-                    onChange={(e) => setCustomerField('phoneAlt', e.target.value)}
-                    placeholder="0501234567"
+                    placeholder="+966 50 123 4567 or 0501234567"
                     className={`${fieldCls} text-start`}
                   />
                 </div>
@@ -3304,9 +3462,6 @@ export default function InvoicePage(): React.JSX.Element {
                   />
                 </div>
               </div>
-              <p className="mt-2 px-1 text-[10px]" style={{ color: THEME.mutedOlive }}>
-                {tr.phoneEitherHint}
-              </p>
             </div>
 
             {/* ORDER DETAILS */}
@@ -3413,7 +3568,12 @@ export default function InvoicePage(): React.JSX.Element {
                         />
                       </div>
                       <div className="md:col-span-2">
-                        <label className={labelCls}>{tr.quantity}</label>
+                        <label className={labelCls}>
+                          {tr.quantity}
+                          {l.productId
+                            ? ` (${unitLabels[inventoryProducts.find((product) => product.id === l.productId)?.unitId || ''] || tr.unit})`
+                            : ''}
+                        </label>
                         <input
                           type="number"
                           min="1"
@@ -3803,11 +3963,6 @@ export default function InvoicePage(): React.JSX.Element {
                         {customer.phone}
                       </p>
                     )}
-                    {customer.phoneAlt && (
-                      <p className="font-mono text-[10px]" dir="ltr" style={{ color: THEME.mutedOlive }}>
-                        {customer.phoneAlt}
-                      </p>
-                    )}
                   </div>
                 ) : (
                   <div
@@ -3919,7 +4074,17 @@ export default function InvoicePage(): React.JSX.Element {
         />
       )}
 
-      {pdfReady && <PdfReadyModal tr={tr} data={pdfReady} onClose={() => setPdfReady(null)} />}
+      {pdfReady && (
+        <PdfReadyModal
+          tr={tr}
+          data={pdfReady}
+          onClose={() => setPdfReady(null)}
+          onOffline={() => {
+            setPdfReady(null);
+            showError(tr.errOfflineQuotation);
+          }}
+        />
+      )}
 
       {showResetConfirm && (
         <ConfirmResetModal

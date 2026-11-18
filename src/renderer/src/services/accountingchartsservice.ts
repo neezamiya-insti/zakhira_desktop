@@ -21,6 +21,7 @@ export type ChartsData = {
     salaries: number;
     personalUse: number;
     other: number;
+    purchases?: number;
   };
 };
 
@@ -29,6 +30,14 @@ export type ChartsData = {
 // ============================================================
 const PAGE = 1000;
 const MONTHS = 6;
+const BUSINESS_ID_KEY = 'zakhira_business_id';
+const CHARTS_CACHE_KEY = 'zakhira_accounting_charts_cache';
+
+type CachedChartsData = {
+  businessId: string;
+  userId: string;
+  data: ChartsData;
+};
 
 const toCents = (v: unknown): number => {
   const n = Number(v);
@@ -69,6 +78,93 @@ const monthKeys = (): string[] => {
   });
 };
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const isChartsData = (value: unknown): value is ChartsData => {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as Record<string, any>;
+  return (
+    Array.isArray(data.months) &&
+    data.months.every(
+      (month: Record<string, unknown>) =>
+        typeof month.key === 'string' &&
+        ['revenue', 'expenses', 'profit', 'inflow', 'outflow'].every((field) =>
+          isFiniteNumber(month[field])
+        )
+    ) &&
+    Array.isArray(data.heat) &&
+    data.heat.length === 7 &&
+    data.heat.every(
+      (row: unknown) =>
+        Array.isArray(row) &&
+        row.length === data.months.length &&
+        row.every(isFiniteNumber)
+    ) &&
+    !!data.expenseTotals &&
+    ['cogs', 'salaries', 'personalUse', 'other'].every((field) =>
+      isFiniteNumber(data.expenseTotals[field])
+    ) &&
+    (data.expenseTotals.purchases === undefined ||
+      isFiniteNumber(data.expenseTotals.purchases))
+  );
+};
+
+const getUserId = (): string => {
+  try {
+    const user = JSON.parse(localStorage.getItem('zakhira_user') || '{}') as {
+      id?: string;
+    };
+    return user.id || '';
+  } catch {
+    return '';
+  }
+};
+
+const getCachedChartsData = (): ChartsData | null => {
+  try {
+    const cached = JSON.parse(
+      localStorage.getItem(CHARTS_CACHE_KEY) || 'null'
+    ) as CachedChartsData | null;
+    if (!cached || !cached.businessId || !isChartsData(cached.data)) return null;
+
+    const businessId = localStorage.getItem(BUSINESS_ID_KEY);
+    const userId = getUserId();
+    if (
+      (businessId && businessId !== cached.businessId) ||
+      (userId && cached.userId && userId !== cached.userId) ||
+      (!businessId && !userId)
+    ) {
+      return null;
+    }
+    return cached.data;
+  } catch {
+    return null;
+  }
+};
+
+const saveCachedChartsData = (businessId: string, data: ChartsData): void => {
+  try {
+    localStorage.setItem(
+      CHARTS_CACHE_KEY,
+      JSON.stringify({ businessId, userId: getUserId(), data } satisfies CachedChartsData)
+    );
+  } catch (error) {
+    console.warn('Could not cache accounting charts data', error);
+  }
+};
+
+const getBusinessId = async (): Promise<string> => {
+  const cached = localStorage.getItem(BUSINESS_ID_KEY);
+  if (cached) return cached;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Business ID is not cached for offline use');
+  }
+  const id = await getCurrentBusinessId();
+  localStorage.setItem(BUSINESS_ID_KEY, id);
+  return id;
+};
+
 type Bucket = {
   revenue: number;
   cogs: number;
@@ -81,8 +177,17 @@ type Bucket = {
 // SERVICE
 // ============================================================
 export const accountingChartsService = {
+  /** Synchronous last-known chart data for instant rendering and offline use. */
+  getCachedChartsData,
+
   async getChartsData(): Promise<ChartsData> {
-    const businessId = await getCurrentBusinessId();
+    const cached = getCachedChartsData();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (cached) return cached;
+      throw new Error('Accounting charts have no saved offline data yet');
+    }
+
+    const businessId = await getBusinessId();
 
     const [
       documents,
@@ -264,14 +369,19 @@ export const accountingChartsService = {
 
     // ---------------- Purchases ----------------
     const paidByOrder = new Map<string, number>();
+    let purchasesTotal = 0;
     for (const p of purchasePayments) {
       const c = toCents(p.amount);
       addOutflow(p.payment_date, c);
+      purchasesTotal += c;
       paidByOrder.set(p.order_id, (paidByOrder.get(p.order_id) || 0) + c);
     }
     for (const o of orders) {
       const residual = toCents(o.payment_amount) - (paidByOrder.get(o.id) || 0);
-      if (residual > 0) addOutflow(o.order_date, residual);
+      if (residual > 0) {
+        purchasesTotal += residual;
+        addOutflow(o.order_date, residual);
+      }
     }
 
     // ---------------- Manual ----------------
@@ -320,7 +430,7 @@ export const accountingChartsService = {
       };
     });
 
-    return {
+    const result = {
       months,
       heat: heat.map((row) => row.map(fromCents)),
       expenseTotals: {
@@ -328,7 +438,10 @@ export const accountingChartsService = {
         salaries: fromCents(salaries),
         personalUse: fromCents(personalUse),
         other: fromCents(otherCat),
+        purchases: fromCents(purchasesTotal),
       },
     };
+    saveCachedChartsData(businessId, result);
+    return result;
   },
 };

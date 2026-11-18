@@ -36,6 +36,10 @@ const t = {
     passwordPh: 'Enter your password',
     remember: 'Remember me',
     forgot: 'Forgot Password?',
+    sendingReset: 'Sending reset link...',
+    forgotEmailRequired: 'Enter your email address first.',
+    forgotSent: 'If an account exists for this email, a reset link has been sent.',
+    forgotFailed: 'Could not send the reset link. Please try again.',
     login: 'Login',
     loggingIn: 'Signing in...',
     inventory: 'Inventory Management',
@@ -54,6 +58,10 @@ const t = {
     passwordPh: 'أدخل كلمة المرور',
     remember: 'تذكرني',
     forgot: 'نسيت كلمة المرور؟',
+    sendingReset: 'جارٍ إرسال رابط إعادة التعيين...',
+    forgotEmailRequired: 'أدخل بريدك الإلكتروني أولاً.',
+    forgotSent: 'إذا كان هذا البريد مسجلاً، فسيتم إرسال رابط إعادة التعيين.',
+    forgotFailed: 'تعذر إرسال رابط إعادة التعيين. حاول مرة أخرى.',
     login: 'دخول',
     loggingIn: 'جارٍ تسجيل الدخول...',
     inventory: 'إدارة المخزون',
@@ -72,6 +80,10 @@ const t = {
     passwordPh: 'اپنا پاس ورڈ درج کریں',
     remember: 'مجھے یاد رکھیں',
     forgot: 'پاس ورڈ بھول گئے؟',
+    sendingReset: 'ری سیٹ لنک بھیجا جا رہا ہے...',
+    forgotEmailRequired: 'پہلے اپنا ای میل درج کریں۔',
+    forgotSent: 'اگر اس ای میل کا اکاؤنٹ موجود ہے تو ری سیٹ لنک بھیج دیا گیا ہے۔',
+    forgotFailed: 'ری سیٹ لنک نہیں بھیجا جا سکا۔ دوبارہ کوشش کریں۔',
     login: 'لاگ ان کریں',
     loggingIn: 'لاگ ان ہو رہا ہے...',
     inventory: 'انوینٹری مینجمنٹ',
@@ -90,6 +102,10 @@ const t = {
     passwordPh: 'अपना पासवर्ड दर्ज करें',
     remember: 'मुझे याद रखें',
     forgot: 'पासवर्ड भूल गए?',
+    sendingReset: 'रीसेट लिंक भेजा जा रहा है...',
+    forgotEmailRequired: 'पहले अपना ईमेल दर्ज करें।',
+    forgotSent: 'अगर इस ईमेल का खाता मौजूद है, तो रीसेट लिंक भेज दिया गया है।',
+    forgotFailed: 'रीसेट लिंक नहीं भेजा जा सका। कृपया फिर कोशिश करें।',
     login: 'लॉगिन करें',
     loggingIn: 'साइन इन हो रहा है...',
     inventory: 'इन्वेंट्री मैनेजमेंट',
@@ -205,7 +221,9 @@ export default function LoginPage(): React.JSX.Element {
   const [remember, setRemember] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [notice, setNotice] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [sendingReset, setSendingReset] = useState<boolean>(false);
 
   const tr = t[language];
   const isRtl = language === 'ar' || language === 'ur';
@@ -214,6 +232,7 @@ export default function LoginPage(): React.JSX.Element {
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setError('');
+    setNotice('');
 
     if (!email || !password) {
       setError(tr.empty);
@@ -256,6 +275,36 @@ export default function LoginPage(): React.JSX.Element {
       console.error("Catch Error:", err);
       setError("An unexpected error occurred.");
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (): Promise<void> => {
+    setError('');
+    setNotice('');
+
+    const resetEmail = email.trim();
+    if (!resetEmail) {
+      setError(tr.forgotEmailRequired);
+      return;
+    }
+
+    setSendingReset(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: 'zakhira://reset-password',
+      });
+
+      if (resetError) {
+        console.error('Password reset request failed:', resetError.message);
+        setError(tr.forgotFailed);
+      } else {
+        setNotice(tr.forgotSent);
+      }
+    } catch (err) {
+      console.error('Password reset request failed:', err);
+      setError(tr.forgotFailed);
+    } finally {
+      setSendingReset(false);
     }
   };
 
@@ -354,6 +403,14 @@ export default function LoginPage(): React.JSX.Element {
                   <span>{error}</span>
                 </div>
               )}
+              {notice && (
+                <div
+                  role="status"
+                  className="mt-3 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-[11px] text-green-800"
+                >
+                  {notice}
+                </div>
+              )}
 
               <form onSubmit={handleLogin} className="mt-5 flex flex-col">
                 {/* Email */}
@@ -411,10 +468,12 @@ export default function LoginPage(): React.JSX.Element {
                   </label>
                   <button
                     type="button"
-                    className="text-[11px] font-medium hover:underline"
-                    style={{ color: THEME.deepForest, cursor: 'pointer' }}
+                    onClick={() => void handleForgotPassword()}
+                    disabled={sendingReset || loading}
+                    className="text-[11px] font-medium hover:underline disabled:opacity-60"
+                    style={{ color: THEME.deepForest, cursor: sendingReset || loading ? 'wait' : 'pointer' }}
                   >
-                    {tr.forgot}
+                    {sendingReset ? tr.sendingReset : tr.forgot}
                   </button>
                 </div>
 

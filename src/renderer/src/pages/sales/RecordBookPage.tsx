@@ -46,9 +46,10 @@ const t = {
     pageSubtitle: 'Track sales performance, payments and invoices',
     totalSales: 'Total Sales',
     receivedAmount: 'Received Amount',
+    returnAmount: 'Returned Amount',
     pendingAmount: 'Pending Amount',
     totalInvoices: 'Total Invoices',
-    netSales: 'net sales',
+    includingTax: 'including tax',
     paidInvoices: 'paid invoices',
     partialInvoices: 'partially paid',
     allIssued: 'issued invoices',
@@ -58,9 +59,10 @@ const t = {
     pageSubtitle: 'تتبع أداء المبيعات والمدفوعات والفواتير',
     totalSales: 'إجمالي المبيعات',
     receivedAmount: 'المبلغ المستلم',
+    returnAmount: 'قيمة المرتجعات',
     pendingAmount: 'المبلغ المعلق',
     totalInvoices: 'إجمالي الفواتير',
-    netSales: 'صافي المبيعات',
+    includingTax: 'شاملاً الضريبة',
     paidInvoices: 'فواتير مدفوعة',
     partialInvoices: 'مدفوعة جزئياً',
     allIssued: 'فواتير صادرة',
@@ -70,9 +72,10 @@ const t = {
     pageSubtitle: 'فروخت کی کارکردگی، ادائیگیاں اور انوائسز ٹریک کریں',
     totalSales: 'کل فروخت',
     receivedAmount: 'موصولہ رقم',
+    returnAmount: 'واپس کیے گئے مال کی قیمت',
     pendingAmount: 'زیر التواء رقم',
     totalInvoices: 'کل انوائسز',
-    netSales: 'نیٹ سیلز',
+    includingTax: 'ٹیکس سمیت',
     paidInvoices: 'ادا شدہ انوائسز',
     partialInvoices: 'جزوی ادا شدہ',
     allIssued: 'جاری انوائسز',
@@ -82,9 +85,10 @@ const t = {
     pageSubtitle: 'बिक्री प्रदर्शन, भुगतान और इनवॉइस ट्रैक करें',
     totalSales: 'कुल बिक्री',
     receivedAmount: 'प्राप्त राशि',
+    returnAmount: 'लौटाए गए सामान की कीमत',
     pendingAmount: 'लंबित राशि',
     totalInvoices: 'कुल इनवॉइस',
-    netSales: 'नेट बिक्री',
+    includingTax: 'टैक्स सहित',
     paidInvoices: 'भुगतान इनवॉइस',
     partialInvoices: 'आंशिक भुगतान',
     allIssued: 'जारी इनवॉइस',
@@ -202,6 +206,7 @@ export default function RecordBookPage(): React.JSX.Element {
   const [stats, setStats] = useState({
     totalSales: 0,
     receivedAmount: 0,
+    returnAmount: 0,
     pendingAmount: 0,
     totalInvoices: 0,
   });
@@ -269,14 +274,14 @@ export default function RecordBookPage(): React.JSX.Element {
         </p>
       </div>
 
-      {/* 4 STAT CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      {/* 5 STAT CARDS */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
         <StatCard
           label={tr.totalSales}
           value={loading ? '...' : formatMoney(stats.totalSales)}
           icon={Icons.trendingUp}
           color={THEME.deepForest}
-          hint={tr.netSales}
+          hint={tr.includingTax}
         />
         <StatCard
           label={tr.receivedAmount}
@@ -284,6 +289,12 @@ export default function RecordBookPage(): React.JSX.Element {
           icon={Icons.money}
           color={THEME.deepForest}
           hint={tr.paidInvoices}
+        />
+        <StatCard
+          label={tr.returnAmount}
+          value={loading ? '...' : formatMoney(stats.returnAmount)}
+          icon={Icons.invoice}
+          color={THEME.warmBrass}
         />
         <StatCard
           label={tr.pendingAmount}

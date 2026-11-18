@@ -22,6 +22,13 @@ export type PaymentMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
 export type Transaction = AccountingTransaction;
 type TxnStatus = Transaction['status'];
 
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
+};
+
 // ============================================================
 // 🌍 LANGUAGE
 // ============================================================
@@ -166,6 +173,8 @@ const t = {
     saving: 'Saving...',
     saveFailed: 'Could not save the entry. Please try again.',
     retry: 'Retry',
+    errSyncAccounting: 'Could not sync to the server',
+    ok: 'OK',
   },
   ar: {
     pageTitle: 'المحاسبة',
@@ -305,6 +314,8 @@ const t = {
     saving: 'جارٍ الحفظ...',
     saveFailed: 'تعذر حفظ القيد. حاول مرة أخرى.',
     retry: 'إعادة المحاولة',
+    errSyncAccounting: 'تعذرت المزامنة مع الخادم',
+    ok: 'موافق',
   },
   ur: {
     pageTitle: 'اکاؤنٹنگ',
@@ -444,6 +455,8 @@ const t = {
     saving: 'محفوظ ہو رہا ہے...',
     saveFailed: 'اندراج محفوظ نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
     retry: 'دوبارہ کوشش کریں',
+    errSyncAccounting: 'سرور کے ساتھ سنک نہیں ہو سکا',
+    ok: 'ٹھیک ہے',
   },
   hi: {
     pageTitle: 'लेखांकन',
@@ -583,6 +596,8 @@ const t = {
     saving: 'सहेजा जा रहा है...',
     saveFailed: 'प्रविष्टि सहेजी नहीं जा सकी। फिर कोशिश करें।',
     retry: 'पुनः प्रयास',
+    errSyncAccounting: 'सर्वर के साथ सिंक नहीं हो सका',
+    ok: 'ठीक है',
   },
 } as const;
 
@@ -1085,6 +1100,56 @@ function Modal({
 }
 
 // ============================================================
+// ERROR MODAL (real sync errors, shown once)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <Modal title={info.title} onClose={onClose} maxWidth="max-w-md" zIndex={80}>
+      <div className="flex items-start gap-2 mb-3">
+        <span className="mt-0.5" style={{ color: '#dc2626' }}>
+          {Icons.alert}
+        </span>
+        <p
+          className="text-[13px] font-semibold break-words"
+          style={{ color: THEME.charcoal }}
+        >
+          {info.message}
+        </p>
+      </div>
+      {(info.details || info.code) && (
+        <div
+          dir="ltr"
+          className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+          style={{
+            backgroundColor: 'rgba(247,243,234,0.6)',
+            border: '1px solid rgba(102,116,90,0.2)',
+            color: THEME.mutedOlive,
+          }}
+        >
+          {info.code ? `Code: ${info.code}\n` : ''}
+          {info.details}
+        </div>
+      )}
+      <button
+        onClick={onClose}
+        className={`${primaryBtn} w-full`}
+        style={primaryBtnStyle}
+      >
+        {okLabel}
+      </button>
+    </Modal>
+  );
+}
+
+// ============================================================
 // STAT CARD
 // ============================================================
 function StatCard({
@@ -1159,7 +1224,7 @@ function StatCard({
 }
 
 // ============================================================
-// REAL INVOICE MODAL  (ab Supabase se async load hota hai)
+// REAL INVOICE MODAL  (ab local SQLite se load hota hai, remote sirf fallback)
 // ============================================================
 function RealInvoiceModal({
   invoiceId,
@@ -1644,7 +1709,7 @@ function InvoicePickerModal({
 }
 
 // ============================================================
-// NEW ENTRY MODAL  (ab accountingService.createTransaction use karta hai)
+// NEW ENTRY MODAL  (accountingService.createTransaction → local SQLite first, then queued)
 // ============================================================
 function NewEntryModal({
   onClose,
@@ -2494,9 +2559,16 @@ export default function AccountingPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from the service's in-memory snapshot → instant render on re-mount
+  const [transactions, setTransactions] = useState<Transaction[]>(
+    () => accountingService.getCached() ?? []
+  );
+  // Only true before the very first local read (or the very first download on a fresh install)
+  const [loading, setLoading] = useState(
+    () => accountingService.getCached() === null
+  );
   const [loadError, setLoadError] = useState('');
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   const [mainTab, setMainTab] = useState<MainTab>('All');
   const [search, setSearch] = useState('');
@@ -2518,22 +2590,33 @@ export default function AccountingPage(): React.JSX.Element {
   } | null>(null);
 
   // ----------------------------------------------------------
-  // DATA LOADING (Supabase via accountingService)
+  // DATA LOADING (local SQLite via accountingService — instant, works offline)
   // ----------------------------------------------------------
   const reload = useCallback(
     async (silent = false): Promise<Transaction[] | null> => {
-      if (!silent) setLoading(true);
+      if (!silent && accountingService.getCached() === null) setLoading(true);
+      let keepLoading = false;
       try {
         const list = await accountingService.getTransactions();
         setTransactions(list);
         setLoadError('');
+        // Fresh install: nothing local yet and the first download is still running →
+        // don't flash "No entries found"; the sync event will refresh us.
+        if (
+          list.length === 0 &&
+          accountingService.isFirstSyncPending() &&
+          typeof navigator !== 'undefined' &&
+          navigator.onLine
+        ) {
+          keepLoading = true;
+        }
         return list;
       } catch (e) {
         console.error('getTransactions failed', e);
         setLoadError(tr.loadError);
         return null;
       } finally {
-        setLoading(false);
+        if (!keepLoading) setLoading(false);
       }
     },
     [tr]
@@ -2546,9 +2629,13 @@ export default function AccountingPage(): React.JSX.Element {
       try {
         const handoff = localStorage.getItem(HANDOFF_VIEW_TXN_KEY);
         if (handoff) {
-          localStorage.removeItem(HANDOFF_VIEW_TXN_KEY);
           const found = list.find((x) => x.transactionNo === handoff);
-          if (found) setViewTxn(found);
+          if (found) {
+            localStorage.removeItem(HANDOFF_VIEW_TXN_KEY);
+            setViewTxn(found);
+          } else if (!accountingService.isFirstSyncPending()) {
+            localStorage.removeItem(HANDOFF_VIEW_TXN_KEY);
+          }
         }
       } catch {
         /* ignore */
@@ -2556,6 +2643,38 @@ export default function AccountingPage(): React.JSX.Element {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Background sync (push queue / pull remote) + its events
+  useEffect(() => {
+    accountingService.startSyncWorker(); // idempotent
+
+    // Background sync changed local data (e.g. another device / sales module) → re-read SQLite
+    const onSynced = (): void => {
+      void reload(true);
+    };
+    // Real sync failure (RLS, constraint, ...) → show the exact reason once
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent<{
+        message: string;
+        details?: string;
+        code?: string;
+      }>).detail;
+      setLoading(false);
+      setErrorInfo({
+        title: t[getStoredLanguage()].errSyncAccounting,
+        message: d.message,
+        details: d.details,
+        code: d.code,
+      });
+    };
+
+    window.addEventListener('zakhira:accounting-synced', onSynced);
+    window.addEventListener('zakhira:accounting-sync-error', onSyncError);
+    return () => {
+      window.removeEventListener('zakhira:accounting-synced', onSynced);
+      window.removeEventListener('zakhira:accounting-sync-error', onSyncError);
+    };
+  }, [reload]);
 
   // Focus / sales update par silent refresh
   useEffect(() => {
@@ -3463,6 +3582,14 @@ td{padding:8px;border:1px solid ${THEME.mutedOlive}40}
             </div>
           </div>
         </Modal>
+      )}
+
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
+        />
       )}
 
       <AccountingCharts />

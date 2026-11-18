@@ -8,6 +8,9 @@ import {
   accountingDashboardService,
   type DashboardMetrics,
 } from '@renderer/services/accountingdashboardservice';
+import { ACCOUNTING_SYNCED_EVENT } from '@renderer/services/accountingservice';
+import { ORDERS_SYNCED_EVENT } from '@renderer/services/orderservice';
+import { SALES_SYNCED_EVENT } from '@renderer/services/salesService';
 
 // Extra accent colours used only by the dashboard cards
 // (agar chahein to inhein theme.ts mein move kar sakte hain)
@@ -221,13 +224,18 @@ export default function AccountingDashboard(): React.JSX.Element {
   const tr = DASH_T[language];
   const rtl = isRTLLang(language);
 
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(() =>
+    accountingDashboardService.getCachedMetrics()
+  );
   const [error, setError] = useState(false);
 
   // sirf sabse naya request apna result set kare (race condition se bachao)
   const requestId = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const cached = accountingDashboardService.getCachedMetrics();
+    if (cached) setMetrics(cached);
+
     const myId = ++requestId.current;
     try {
       const m = await accountingDashboardService.getMetrics();
@@ -242,20 +250,29 @@ export default function AccountingDashboard(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load();
-
     const reload = (): void => {
       void load();
     };
+
     window.addEventListener('focus', reload);
+    window.addEventListener('online', reload);
     window.addEventListener('zakhira:sales-updated', reload as EventListener);
+    window.addEventListener(ACCOUNTING_SYNCED_EVENT, reload);
+    window.addEventListener(ORDERS_SYNCED_EVENT, reload);
+    window.addEventListener(SALES_SYNCED_EVENT, reload);
+    void load();
+
     return () => {
       requestId.current++; // unmount ke baad koi setState na ho
       window.removeEventListener('focus', reload);
+      window.removeEventListener('online', reload);
       window.removeEventListener(
         'zakhira:sales-updated',
         reload as EventListener
       );
+      window.removeEventListener(ACCOUNTING_SYNCED_EVENT, reload);
+      window.removeEventListener(ORDERS_SYNCED_EVENT, reload);
+      window.removeEventListener(SALES_SYNCED_EVENT, reload);
     };
   }, [load]);
 

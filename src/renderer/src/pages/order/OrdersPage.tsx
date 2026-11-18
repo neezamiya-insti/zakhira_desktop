@@ -6,12 +6,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { THEME } from '@renderer/theme/theme';
 import {
   productService,
+  PRODUCTS_SYNCED_EVENT,
   type Product as DbProduct,
 } from '@renderer/services/productService';
-import { vendorsService, type Vendor } from '@renderer/services/vendorsservice';
+import {
+  vendorsService,
+  VENDORS_SYNCED_EVENT,
+  type Vendor,
+} from '@renderer/services/vendorService';
 import {
   orderService,
   OrderServiceError,
+  ORDERS_SYNCED_EVENT,
+  ORDERS_SYNC_ERROR_EVENT,
   type PurchaseOrder as Order,
   type PurchasePayment as PaymentRecord,
   type StatusHistoryEntry as StatusHistory,
@@ -3174,12 +3181,15 @@ export default function OrdersPage(): React.JSX.Element {
   const isRTL = language === 'ar' || language === 'ur';
   const tr: Translations = t[language];
 
-  // ✅ all data comes from the backend
-  const [orders, setOrders] = useState<Order[]>([]);
+  // ✅ instant paint: in-memory snapshot from the service (null on first launch)
+  const [initialCache] = useState<Order[] | null>(() => orderService.getCachedOrders());
+
+  // ✅ all data comes from the local DB (synced with the backend in the background)
+  const [orders, setOrders] = useState<Order[]>(initialCache ?? []);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [units, setUnits] = useState<MeasuringUnit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initialCache === null);
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -3226,7 +3236,7 @@ export default function OrdersPage(): React.JSX.Element {
   };
 
   // ==========================================================
-  // LOAD FROM BACKEND
+  // LOAD (local DB first — instant, works offline)
   // ==========================================================
   const loadAll = async (): Promise<void> => {
     try {
@@ -3256,8 +3266,12 @@ export default function OrdersPage(): React.JSX.Element {
   });
 
   useEffect(() => {
-    void loadRef.current();
     const onFocus = (): void => void loadRef.current();
+
+    // ✅ background sync changed local orders (e.g. another device) -> re-read
+    const onSynced = (): void => void loadRef.current();
+    const onCatalogSynced = (): void => void loadRef.current();
+
     const onInventory = (): void => {
       // ignore the event this page fired itself
       if (skipInventoryEvent.current) {
@@ -3266,11 +3280,38 @@ export default function OrdersPage(): React.JSX.Element {
       }
       void loadRef.current();
     };
+
+    // ✅ real sync errors (conflicts, server rejections) are shown to the user
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent<{ message?: string; orderNumber?: string }>).detail;
+      const msg = d?.message || 'Sync error';
+      setErrorMsg(d?.orderNumber ? `${d.orderNumber}: ${msg}` : msg);
+      setSuccessMsg('');
+      setTimeout(() => setErrorMsg(''), 5000);
+    };
+
     window.addEventListener('focus', onFocus);
     window.addEventListener('zakhira:inventory-updated', onInventory);
+    window.addEventListener(ORDERS_SYNCED_EVENT, onSynced);
+    window.addEventListener(PRODUCTS_SYNCED_EVENT, onCatalogSynced);
+    window.addEventListener(VENDORS_SYNCED_EVENT, onCatalogSynced);
+    window.addEventListener(ORDERS_SYNC_ERROR_EVENT, onSyncError);
+
+    // Load local SQLite data first so the page remains usable offline.
+    void loadRef.current().then(() => {
+      // Sync only after the initial local read; all workers are idempotent.
+      orderService.startSyncWorker();
+      vendorsService.startSyncWorker();
+      productService.startSyncWorker();
+    });
+
     return () => {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('zakhira:inventory-updated', onInventory);
+      window.removeEventListener(ORDERS_SYNCED_EVENT, onSynced);
+      window.removeEventListener(PRODUCTS_SYNCED_EVENT, onCatalogSynced);
+      window.removeEventListener(VENDORS_SYNCED_EVENT, onCatalogSynced);
+      window.removeEventListener(ORDERS_SYNC_ERROR_EVENT, onSyncError);
     };
   }, []);
 
@@ -3853,20 +3894,23 @@ export default function OrdersPage(): React.JSX.Element {
                               >
                                 {Icons.check}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setCancelTarget(o)}
-                                title={tr.cancelTitle}
-                                aria-label={`${tr.cancelTitle} ${o.orderNumber}`}
-                                className={`${actionBtnCls} border`}
-                                style={{
-                                  backgroundColor: 'rgba(196,154,90,0.15)',
-                                  color: CHARCOAL,
-                                  borderColor: 'rgba(196,154,90,0.4)',
-                                }}
-                              >
-                                {Icons.x}
-                              </button>
+                              {/* ✅ orders with payments cannot be cancelled (service rule HAS_PAYMENTS) */}
+                              {o.paymentAmount <= 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCancelTarget(o)}
+                                  title={tr.cancelTitle}
+                                  aria-label={`${tr.cancelTitle} ${o.orderNumber}`}
+                                  className={`${actionBtnCls} border`}
+                                  style={{
+                                    backgroundColor: 'rgba(196,154,90,0.15)',
+                                    color: CHARCOAL,
+                                    borderColor: 'rgba(196,154,90,0.4)',
+                                  }}
+                                >
+                                  {Icons.x}
+                                </button>
+                              )}
                             </>
                           )}
                         </div>

@@ -18,12 +18,95 @@ export type DashboardMetrics = {
 // HELPERS
 // ============================================================
 const PAGE = 1000;
+const BUSINESS_ID_KEY = 'zakhira_business_id';
+const METRICS_CACHE_KEY = 'zakhira_accounting_dashboard_metrics';
+const METRIC_FIELDS: (keyof DashboardMetrics)[] = [
+  'totalRevenue',
+  'netProfit',
+  'cashInBank',
+  'payables',
+  'receivables',
+  'cogs',
+  'otherExpenses',
+];
+
+type CachedMetrics = {
+  businessId: string;
+  userId: string;
+  metrics: DashboardMetrics;
+};
 
 const toCents = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 };
 const fromCents = (c: number): number => Math.round(c) / 100;
+
+const isMetrics = (value: unknown): value is DashboardMetrics => {
+  if (!value || typeof value !== 'object') return false;
+  const metrics = value as Record<string, unknown>;
+  return METRIC_FIELDS.every(
+    (field) => typeof metrics[field] === 'number' && Number.isFinite(metrics[field])
+  );
+};
+
+const getUserId = (): string => {
+  try {
+    const user = JSON.parse(localStorage.getItem('zakhira_user') || '{}') as {
+      id?: string;
+    };
+    return user.id || '';
+  } catch {
+    return '';
+  }
+};
+
+const getBusinessId = async (): Promise<string> => {
+  const cached = localStorage.getItem(BUSINESS_ID_KEY);
+  if (cached) return cached;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Business ID is not cached for offline use');
+  }
+  const id = await getCurrentBusinessId();
+  localStorage.setItem(BUSINESS_ID_KEY, id);
+  return id;
+};
+
+const saveCachedMetrics = (
+  businessId: string,
+  metrics: DashboardMetrics
+): void => {
+  try {
+    localStorage.setItem(
+      METRICS_CACHE_KEY,
+      JSON.stringify({ businessId, userId: getUserId(), metrics } satisfies CachedMetrics)
+    );
+  } catch (error) {
+    console.warn('Could not cache accounting dashboard metrics', error);
+  }
+};
+
+const getCachedMetrics = (): DashboardMetrics | null => {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(METRICS_CACHE_KEY) || 'null'
+    ) as CachedMetrics | null;
+    if (!value || !value.businessId || !isMetrics(value.metrics)) return null;
+
+    const businessId = localStorage.getItem(BUSINESS_ID_KEY);
+    const userId = getUserId();
+    if (
+      (businessId && businessId !== value.businessId) ||
+      (userId && value.userId && userId !== value.userId) ||
+      (!businessId && !userId)
+    ) {
+      return null;
+    }
+    return value.metrics;
+  } catch {
+    return null;
+  }
+};
 
 async function fetchAll(
   build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>
@@ -44,8 +127,17 @@ const one = (rel: any): any => (Array.isArray(rel) ? rel[0] : rel) || {};
 // SERVICE
 // ============================================================
 export const accountingDashboardService = {
+  /** Synchronous last-known metrics for instant rendering and offline use. */
+  getCachedMetrics,
+
   async getMetrics(): Promise<DashboardMetrics> {
-    const businessId = await getCurrentBusinessId();
+    const cached = getCachedMetrics();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (cached) return cached;
+      throw new Error('Accounting dashboard has no saved offline metrics yet');
+    }
+
+    const businessId = await getBusinessId();
 
     const [documents, orders, manual, expenses, lines, returns, returnItems] =
       await Promise.all([
@@ -101,7 +193,7 @@ export const accountingDashboardService = {
         fetchAll((from, to) =>
           supabase
             .from('sales_returns')
-            .select('id, subtotal')
+            .select('id, tax_total, total_return_amount')
             .eq('business_id', businessId)
             .order('id')
             .range(from, to)
@@ -110,7 +202,7 @@ export const accountingDashboardService = {
           supabase
             .from('sales_return_items')
             .select(
-              'id, return_qty, sales_document_lines(cost_price), sales_returns!inner(business_id)'
+              'id, return_id, return_qty, total_amount, sales_document_lines!inner(quantity, line_total, cost_price, sales_documents!inner(subtotal, tax_total)), sales_returns!inner(business_id)'
             )
             .eq('sales_returns.business_id', businessId)
             .order('id')
@@ -129,8 +221,36 @@ export const accountingDashboardService = {
       documentReceivables += Math.max(0, toCents(d.balance_due));
     }
 
+    let salesReturnCashOutflow = 0;
+    for (const r of returns) {
+      salesReturnCashOutflow += toCents(r.total_return_amount);
+    }
+
     let salesReturns = 0;
-    for (const r of returns) salesReturns += toCents(r.subtotal);
+    const returnsWithItems = new Set<string>();
+    for (const ri of returnItems) {
+      returnsWithItems.add(String(ri.return_id));
+      const line = one(ri.sales_document_lines);
+      const document = one(line.sales_documents);
+      const originalQty = Number(line.quantity) || 0;
+      const returnedQty = Number(ri.return_qty) || 0;
+      const documentSubtotal = Number(document.subtotal) || 0;
+      const lineShare =
+        documentSubtotal > 0 ? (Number(line.line_total) || 0) / documentSubtotal : 0;
+      const lineTaxCents = toCents(document.tax_total) * lineShare;
+      const returnedTaxCents =
+        originalQty > 0 ? Math.round((lineTaxCents * returnedQty) / originalQty) : 0;
+
+      salesReturns += Math.max(0, toCents(ri.total_amount) - returnedTaxCents);
+    }
+    for (const r of returns) {
+      if (!returnsWithItems.has(String(r.id))) {
+        salesReturns += Math.max(
+          0,
+          toCents(r.total_return_amount) - toCents(r.tax_total)
+        );
+      }
+    }
 
     // ---------------- Purchase side ----------------
     let cashToVendors = 0;
@@ -155,6 +275,7 @@ export const accountingDashboardService = {
 
       if (isReturn) {
         manualReturns += amt;
+        manualCashOut += amt;
       } else if (t.type === 'In') {
         manualIn += amt;
         if (t.status === 'Paid') manualCashIn += amt;
@@ -183,14 +304,20 @@ export const accountingDashboardService = {
     cogs = Math.max(0, cogs);
 
     // ---------------- Final figures ----------------
-    const totalRevenue = salesRevenue + manualIn - salesReturns - manualReturns;
+    const totalRevenue = Math.max(
+      0,
+      salesRevenue + manualIn - salesReturns - manualReturns
+    );
     const netProfit = totalRevenue - cogs - otherExpenses;
     const cashInBank =
-      cashFromDocuments + manualCashIn - (cashToVendors + manualCashOut) - otherExpenses;
+      cashFromDocuments +
+      manualCashIn -
+      (cashToVendors + manualCashOut + salesReturnCashOutflow) -
+      otherExpenses;
     const receivables = documentReceivables + manualReceivable;
     const payables = vendorPayables + manualPayable;
 
-    return {
+    const metrics = {
       totalRevenue: fromCents(totalRevenue),
       netProfit: fromCents(netProfit),
       cashInBank: fromCents(cashInBank),
@@ -199,5 +326,7 @@ export const accountingDashboardService = {
       cogs: fromCents(cogs),
       otherExpenses: fromCents(otherExpenses),
     };
+    saveCachedMetrics(businessId, metrics);
+    return metrics;
   },
 };

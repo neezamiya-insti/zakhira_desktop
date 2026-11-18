@@ -1,8 +1,11 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { THEME } from '@renderer/theme/theme';
-import { profileService } from '@renderer/services/profileService';
+import {
+  PROFILE_SYNC_ERROR_EVENT,
+  profileService,
+} from '@renderer/services/profileService';
 
 // ============================================================
 // TYPES
@@ -97,8 +100,11 @@ const t = {
     errLoadAccount: 'Could not load account details',
     errSaveProfile: 'Could not save business profile',
     errSaveAccount: 'Could not save account changes',
+    errSyncProfile: 'Could not sync profile changes',
     emailPendingNote:
       'Email change requested — check your inbox and confirm the new address.',
+    credentialsRequireOnline:
+      'Name and phone were saved for sync. Email and password changes require an internet connection.',
     loading: 'Loading…',
     ok: 'OK',
   },
@@ -148,8 +154,11 @@ const t = {
     errLoadAccount: 'تعذر تحميل بيانات الحساب',
     errSaveProfile: 'تعذر حفظ ملف العمل',
     errSaveAccount: 'تعذر حفظ تغييرات الحساب',
+    errSyncProfile: 'تعذر مزامنة تغييرات الملف الشخصي',
     emailPendingNote:
       'تم طلب تغيير البريد — تحقق من صندوق الوارد وأكد العنوان الجديد.',
+    credentialsRequireOnline:
+      'تم حفظ الاسم والهاتف للمزامنة. يتطلب تغيير البريد وكلمة المرور اتصالاً بالإنترنت.',
     loading: 'جارٍ التحميل…',
     ok: 'موافق',
   },
@@ -199,8 +208,11 @@ const t = {
     errLoadAccount: 'اکاؤنٹ کی تفصیلات لوڈ نہیں ہو سکیں',
     errSaveProfile: 'کاروباری پروفائل محفوظ نہیں ہو سکا',
     errSaveAccount: 'اکاؤنٹ کی تبدیلیاں محفوظ نہیں ہو سکیں',
+    errSyncProfile: 'پروفائل کی تبدیلیاں سنک نہیں ہو سکیں',
     emailPendingNote:
       'ای میل تبدیلی کی درخواست بھیج دی گئی — ان باکس چیک کر کے نیا پتہ تصدیق کریں۔',
+    credentialsRequireOnline:
+      'نام اور فون سنک کے لیے محفوظ ہو گئے۔ ای میل اور پاس ورڈ کی تبدیلی کے لیے انٹرنیٹ درکار ہے۔',
     loading: 'لوڈ ہو رہا ہے…',
     ok: 'ٹھیک ہے',
   },
@@ -250,8 +262,11 @@ const t = {
     errLoadAccount: 'खाते का विवरण लोड नहीं हो सका',
     errSaveProfile: 'व्यवसाय प्रोफ़ाइल सहेजी नहीं जा सकी',
     errSaveAccount: 'खाते के परिवर्तन सहेजे नहीं जा सके',
+    errSyncProfile: 'प्रोफ़ाइल परिवर्तन सिंक नहीं हो सके',
     emailPendingNote:
       'ईमेल बदलने का अनुरोध भेजा गया — इनबॉक्स देखें और नया पता सत्यापित करें।',
+    credentialsRequireOnline:
+      'नाम और फ़ोन सिंक के लिए सहेजे गए। ईमेल और पासवर्ड बदलने के लिए इंटरनेट कनेक्शन चाहिए।',
     loading: 'लोड हो रहा है…',
     ok: 'ठीक है',
   },
@@ -296,7 +311,13 @@ const cacheProfile = (p: BusinessProfile): void => {
   }
 };
 
-type StoredUser = { id?: string; name?: string; email?: string; language?: Lang };
+type StoredUser = {
+  id?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  language?: Lang;
+};
 
 const readStoredUser = (): StoredUser => {
   try {
@@ -582,17 +603,19 @@ export default function ProfilePage(): React.JSX.Element {
   const [baseline, setBaseline] = useState<AccountBaseline>({
     fullName: user.name || '',
     email: user.email || '',
-    phone: '',
+    phone: user.phone || '',
   });
   const [credentials, setCredentials] = useState<UserCredentials>({
     fullName: user.name || '',
     email: user.email || '',
-    phone: '',
+    phone: user.phone || '',
     newPassword: '',
     confirmPassword: '',
   });
+  const profileEdited = useRef(false);
+  const credentialsEdited = useRef(false);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !localStorage.getItem(PROFILE_KEY));
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
   const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
@@ -613,9 +636,15 @@ export default function ProfilePage(): React.JSX.Element {
     setErrorInfo({ title, ...describeError(err) });
   };
 
-  // Load business + account from Supabase
+  // Load cached values first, then refresh from Supabase when available.
   useEffect(() => {
     let alive = true;
+    const handleSyncError = (event: Event): void => {
+      reportError(tr.errSyncProfile, (event as CustomEvent<unknown>).detail);
+    };
+    window.addEventListener(PROFILE_SYNC_ERROR_EVENT, handleSyncError);
+    profileService.startSyncWorker();
+
     const load = async (): Promise<void> => {
       const [bizR, accR] = await Promise.allSettled([
         profileService.getBusinessProfile(),
@@ -625,8 +654,10 @@ export default function ProfilePage(): React.JSX.Element {
 
       if (bizR.status === 'fulfilled') {
         const mapped = mapBusiness(bizR.value as DbBusiness);
-        setProfile(mapped);
-        cacheProfile(mapped);
+        if (!profileEdited.current) {
+          setProfile(mapped);
+          cacheProfile(mapped);
+        }
       } else {
         reportError(tr.errLoadBusiness, bizR.reason);
       }
@@ -635,10 +666,12 @@ export default function ProfilePage(): React.JSX.Element {
         const acc: AccountBaseline = {
           fullName: accR.value.fullName || user.name || '',
           email: accR.value.email || user.email || '',
-          phone: accR.value.phone || '',
+          phone: accR.value.phone || user.phone || '',
         };
-        setBaseline(acc);
-        setCredentials((c) => ({ ...c, ...acc }));
+        if (!credentialsEdited.current) {
+          setBaseline(acc);
+          setCredentials((c) => ({ ...c, ...acc }));
+        }
       } else {
         reportError(tr.errLoadAccount, accR.reason);
       }
@@ -648,6 +681,7 @@ export default function ProfilePage(): React.JSX.Element {
     void load();
     return () => {
       alive = false;
+      window.removeEventListener(PROFILE_SYNC_ERROR_EVENT, handleSyncError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -655,6 +689,16 @@ export default function ProfilePage(): React.JSX.Element {
   const showSaved = (): void => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const updateProfile = (next: BusinessProfile): void => {
+    profileEdited.current = true;
+    setProfile(next);
+  };
+
+  const updateCredentials = (next: UserCredentials): void => {
+    credentialsEdited.current = true;
+    setCredentials(next);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -680,6 +724,7 @@ export default function ProfilePage(): React.JSX.Element {
         return;
       }
       setProfile((p) => ({ ...p, logo: result }));
+      profileEdited.current = true;
       setLogoError('');
     };
     reader.onerror = () => setLogoError(tr.errReadFail);
@@ -703,6 +748,7 @@ export default function ProfilePage(): React.JSX.Element {
       const mapped = mapBusiness(row as DbBusiness);
       setProfile(mapped);
       cacheProfile(mapped);
+      profileEdited.current = false;
       showSaved();
     } catch (err) {
       reportError(tr.errSaveProfile, err); // console + popup
@@ -738,12 +784,22 @@ export default function ProfilePage(): React.JSX.Element {
     try {
       // 1) name + phone (profiles table)
       await profileService.updateProfile({ fullName, phone });
-      patchStoredUser({ name: fullName });
+      patchStoredUser({ name: fullName, phone });
       setBaseline((b) => ({ ...b, fullName, phone }));
 
       // 2) email (Supabase Auth) — only if it changed
       let emailPending = false;
-      if (newEmail.toLowerCase() !== baseline.email.toLowerCase()) {
+      const emailChanged =
+        newEmail.toLowerCase() !== baseline.email.toLowerCase();
+      const requiresConnection =
+        !navigator.onLine && (emailChanged || Boolean(credentials.newPassword));
+      if (requiresConnection) {
+        setNotice(tr.credentialsRequireOnline);
+        showSaved();
+        return;
+      }
+
+      if (emailChanged) {
         const res = await profileService.updateEmail(newEmail);
         if (res.user?.email?.toLowerCase() === newEmail.toLowerCase()) {
           patchStoredUser({ email: newEmail });
@@ -759,6 +815,7 @@ export default function ProfilePage(): React.JSX.Element {
       }
 
       setCredentials((c) => ({ ...c, newPassword: '', confirmPassword: '' }));
+      credentialsEdited.current = false;
       if (emailPending) setNotice(tr.emailPendingNote);
       showSaved();
     } catch (err) {
@@ -920,7 +977,9 @@ export default function ProfilePage(): React.JSX.Element {
                 <TextInput
                   value={profile.businessName}
                   error={!!profileErrors.businessName}
-                  onChange={(v) => setProfile({ ...profile, businessName: v })}
+                  onChange={(v) =>
+                    updateProfile({ ...profile, businessName: v })
+                  }
                 />
                 {profileErrors.businessName && (
                   <p className={errTextCls} style={{ color: ERR_COLOR }}>
@@ -938,7 +997,7 @@ export default function ProfilePage(): React.JSX.Element {
                     dir="rtl"
                     value={profile.businessNameUr}
                     onChange={(v) =>
-                      setProfile({ ...profile, businessNameUr: v })
+                      updateProfile({ ...profile, businessNameUr: v })
                     }
                   />
                 </div>
@@ -950,7 +1009,7 @@ export default function ProfilePage(): React.JSX.Element {
                     dir="rtl"
                     value={profile.businessNameAr}
                     onChange={(v) =>
-                      setProfile({ ...profile, businessNameAr: v })
+                      updateProfile({ ...profile, businessNameAr: v })
                     }
                   />
                 </div>
@@ -965,7 +1024,7 @@ export default function ProfilePage(): React.JSX.Element {
                     type="tel"
                     mono
                     value={profile.phone}
-                    onChange={(v) => setProfile({ ...profile, phone: v })}
+                    onChange={(v) => updateProfile({ ...profile, phone: v })}
                   />
                 </div>
                 <div>
@@ -975,7 +1034,7 @@ export default function ProfilePage(): React.JSX.Element {
                   <TextInput
                     type="email"
                     value={profile.email}
-                    onChange={(v) => setProfile({ ...profile, email: v })}
+                    onChange={(v) => updateProfile({ ...profile, email: v })}
                   />
                 </div>
               </div>
@@ -986,7 +1045,7 @@ export default function ProfilePage(): React.JSX.Element {
                 </label>
                 <TextInput
                   value={profile.address}
-                  onChange={(v) => setProfile({ ...profile, address: v })}
+                  onChange={(v) => updateProfile({ ...profile, address: v })}
                 />
               </div>
 
@@ -996,7 +1055,7 @@ export default function ProfilePage(): React.JSX.Element {
                 </label>
                 <TextInput
                   value={profile.city}
-                  onChange={(v) => setProfile({ ...profile, city: v })}
+                  onChange={(v) => updateProfile({ ...profile, city: v })}
                 />
               </div>
             </div>
@@ -1047,7 +1106,7 @@ export default function ProfilePage(): React.JSX.Element {
                     error={!!credErrors.fullName}
                     placeholder={tr.fullNamePh}
                     onChange={(v) =>
-                      setCredentials({ ...credentials, fullName: v })
+                      updateCredentials({ ...credentials, fullName: v })
                     }
                   />
                   {credErrors.fullName && (
@@ -1066,7 +1125,7 @@ export default function ProfilePage(): React.JSX.Element {
                     error={!!credErrors.email}
                     placeholder={tr.emailPh}
                     onChange={(v) =>
-                      setCredentials({ ...credentials, email: v })
+                      updateCredentials({ ...credentials, email: v })
                     }
                   />
                   {credErrors.email && (
@@ -1086,7 +1145,9 @@ export default function ProfilePage(): React.JSX.Element {
                   mono
                   value={credentials.phone}
                   placeholder={tr.phonePh}
-                  onChange={(v) => setCredentials({ ...credentials, phone: v })}
+                  onChange={(v) =>
+                    updateCredentials({ ...credentials, phone: v })
+                  }
                 />
               </div>
 
@@ -1117,7 +1178,7 @@ export default function ProfilePage(): React.JSX.Element {
                         placeholder={tr.newPasswordPh}
                         padEnd
                         onChange={(v) =>
-                          setCredentials({ ...credentials, newPassword: v })
+                          updateCredentials({ ...credentials, newPassword: v })
                         }
                       />
                       <button
@@ -1156,7 +1217,10 @@ export default function ProfilePage(): React.JSX.Element {
                         placeholder={tr.confirmPasswordPh}
                         padEnd
                         onChange={(v) =>
-                          setCredentials({ ...credentials, confirmPassword: v })
+                          updateCredentials({
+                            ...credentials,
+                            confirmPassword: v,
+                          })
                         }
                       />
                       <button
@@ -1204,6 +1268,7 @@ export default function ProfilePage(): React.JSX.Element {
                     newPassword: '',
                     confirmPassword: '',
                   });
+                  credentialsEdited.current = false;
                   setCredErrors({});
                   setNotice('');
                 }}

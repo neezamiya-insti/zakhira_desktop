@@ -27,9 +27,17 @@ const rbT = {
     filters: 'Filters',
     search: 'Search',
     searchPh: 'Order no, customer, phone...',
+    paymentStatusFilter: 'Payment Status',
+    allPayments: 'All Payments',
     dateFrom: 'Date From',
     dateTo: 'Date To',
     clearFilters: 'Clear all filters',
+    exportLabel: 'Export',
+    exportCsv: 'Export CSV',
+    exportPdf: 'Export PDF',
+    exportSuccess: 'Records exported successfully.',
+    exportFailed: 'Could not export records. Please try again.',
+    currency: 'Currency',
     sortBy: 'Sort By',
     sortNewest: 'Newest first',
     sortOldest: 'Oldest first',
@@ -215,14 +223,24 @@ const rbT = {
     stockIn: 'Stock In',
     stockOut: 'Stock Out',
     stockBalance: 'Stock Balance',
+    errSyncRecords: 'Could not sync to the server',
+    ok: 'OK',
   },
   ar: {
     filters: 'الفلاتر',
     search: 'بحث',
     searchPh: 'رقم الطلب، العميل، الهاتف...',
+    paymentStatusFilter: 'حالة الدفع',
+    allPayments: 'كل المدفوعات',
     dateFrom: 'من تاريخ',
     dateTo: 'إلى تاريخ',
     clearFilters: 'مسح جميع الفلاتر',
+    exportLabel: 'تصدير',
+    exportCsv: 'تصدير CSV',
+    exportPdf: 'تصدير PDF',
+    exportSuccess: 'تم تصدير السجلات بنجاح.',
+    exportFailed: 'تعذر تصدير السجلات. حاول مرة أخرى.',
+    currency: 'العملة',
     sortBy: 'ترتيب حسب',
     sortNewest: 'الأحدث أولاً',
     sortOldest: 'الأقدم أولاً',
@@ -408,14 +426,24 @@ const rbT = {
     stockIn: 'دخول مخزون',
     stockOut: 'خروج مخزون',
     stockBalance: 'رصيد المخزون',
+    errSyncRecords: 'تعذرت المزامنة مع الخادم',
+    ok: 'موافق',
   },
   ur: {
     filters: 'فلٹرز',
     search: 'تلاش',
     searchPh: 'آرڈر نمبر، کسٹمر، فون...',
+    paymentStatusFilter: 'ادائیگی کی حالت',
+    allPayments: 'تمام ادائیگیاں',
     dateFrom: 'تاریخ سے',
     dateTo: 'تاریخ تک',
     clearFilters: 'تمام فلٹرز صاف کریں',
+    exportLabel: 'ایکسپورٹ',
+    exportCsv: 'CSV ایکسپورٹ کریں',
+    exportPdf: 'PDF ایکسپورٹ کریں',
+    exportSuccess: 'ریکارڈز کامیابی سے ایکسپورٹ ہو گئے۔',
+    exportFailed: 'ریکارڈز ایکسپورٹ نہیں ہو سکے۔ دوبارہ کوشش کریں۔',
+    currency: 'کرنسی',
     sortBy: 'ترتیب بلحاظ',
     sortNewest: 'نیا پہلے',
     sortOldest: 'پرانا پہلے',
@@ -601,14 +629,24 @@ const rbT = {
     stockIn: 'اسٹاک اندر',
     stockOut: 'اسٹاک باہر',
     stockBalance: 'اسٹاک بیلنس',
+    errSyncRecords: 'سرور کے ساتھ سنک نہیں ہو سکا',
+    ok: 'ٹھیک ہے',
   },
   hi: {
     filters: 'फ़िल्टर',
     search: 'खोजें',
     searchPh: 'ऑर्डर नं., ग्राहक, फ़ोन...',
+    paymentStatusFilter: 'भुगतान स्थिति',
+    allPayments: 'सभी भुगतान',
     dateFrom: 'तारीख से',
     dateTo: 'तारीख तक',
     clearFilters: 'सभी फ़िल्टर हटाएँ',
+    exportLabel: 'एक्सपोर्ट',
+    exportCsv: 'CSV एक्सपोर्ट करें',
+    exportPdf: 'PDF एक्सपोर्ट करें',
+    exportSuccess: 'रिकॉर्ड सफलतापूर्वक एक्सपोर्ट हुए।',
+    exportFailed: 'रिकॉर्ड एक्सपोर्ट नहीं हो सके। फिर कोशिश करें।',
+    currency: 'मुद्रा',
     sortBy: 'क्रमबद्ध करें',
     sortNewest: 'नया पहले',
     sortOldest: 'पुराना पहले',
@@ -794,6 +832,8 @@ const rbT = {
     stockIn: 'स्टॉक इन',
     stockOut: 'स्टॉक आउट',
     stockBalance: 'स्टॉक बैलेंस',
+    errSyncRecords: 'सर्वर के साथ सिंक नहीं हो सका',
+    ok: 'ठीक है',
   },
 } as const;
 
@@ -929,6 +969,13 @@ type SortKey =
 
 type CompanyInfo = { name: string; address: string; phone: string; vat: string };
 
+type ErrorInfo = {
+  title: string;
+  message: string;
+  details?: string;
+  code?: string;
+};
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -964,6 +1011,37 @@ const todayISO = (): string => {
 };
 
 const phoneDigits = (raw: string): string => raw.replace(/\D/g, '');
+
+const escapeExportHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const csvCell = (value: string | number): string => {
+  let text = String(value);
+  if (typeof value === 'string' && /^[\s]*[=+\-@]/.test(value)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const downloadExport = (blob: Blob, filename: string): void => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+};
+
+type ExportPdfChain = {
+  set: (options: Record<string, unknown>) => ExportPdfChain;
+  from: (element: HTMLElement) => ExportPdfChain;
+  outputPdf: (type: 'blob') => Promise<Blob>;
+};
 
 const getStoredLanguage = (): Language => {
   try {
@@ -1534,6 +1612,56 @@ function Modal({
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
       </div>
     </div>
+  );
+}
+
+// ============================================================
+// ERROR MODAL (shows real sync errors in a popup)
+// ============================================================
+function ErrorModal({
+  info,
+  okLabel,
+  onClose,
+}: {
+  info: ErrorInfo;
+  okLabel: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <Modal title={info.title} onClose={onClose} maxWidth="max-w-md" z="z-[70]">
+      <div className="flex items-start gap-2 mb-3">
+        <span className="mt-0.5" style={{ color: '#dc2626' }}>
+          {RbIcons.alert}
+        </span>
+        <p
+          className="text-[13px] font-semibold break-words"
+          style={{ color: THEME.charcoal }}
+        >
+          {info.message}
+        </p>
+      </div>
+      {(info.details || info.code) && (
+        <div
+          dir="ltr"
+          className="rounded-xl p-2.5 mb-3 text-[11px] font-mono break-all whitespace-pre-wrap"
+          style={{
+            background: '#FFFFFF',
+            border: `1px solid ${THEME.mutedOlive}30`,
+            color: THEME.mutedOlive,
+          }}
+        >
+          {info.code ? `Code: ${info.code}\n` : ''}
+          {info.details}
+        </div>
+      )}
+      <button
+        onClick={onClose}
+        className="w-full h-9 rounded-full text-[13px] font-bold cursor-pointer"
+        style={{ background: THEME.warmBrass, color: THEME.warmIvory }}
+      >
+        {okLabel}
+      </button>
+    </Modal>
   );
 }
 
@@ -2330,17 +2458,15 @@ function ReturnModal({
     const returnQty = returnQtys[l.id] || 0;
     const originalQty = l.quantity || 1;
 
+    const lineShare = record.subtotal > 0 ? l.lineTotal / record.subtotal : 0;
     const lineGrossPaid =
-      record.subtotal > 0
-        ? (l.lineTotal / record.subtotal) * record.grandTotal
-        : l.lineTotal;
+      record.subtotal > 0 ? lineShare * record.grandTotal : l.lineTotal;
+    const lineTaxPaid = record.subtotal > 0 ? lineShare * record.taxTotal : 0;
 
     const perUnitPaid = lineGrossPaid / originalQty;
     const totalAmount = roundMoney(perUnitPaid * returnQty);
-
-    const taxRatio = record.grandTotal > 0 ? record.subtotal / record.grandTotal : 1;
-    const subtotal = roundMoney(totalAmount * taxRatio);
-    const taxAmount = roundMoney(totalAmount - subtotal);
+    const taxAmount = roundMoney((lineTaxPaid / originalQty) * returnQty);
+    const subtotal = roundMoney(totalAmount - taxAmount);
 
     return {
       lineId: l.id,
@@ -3251,11 +3377,18 @@ export default function RecordsSection(): React.JSX.Element {
   const navigate = useNavigate();
 
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
-  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
-  const [history, setHistory] = useState<StatusHistory[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from the service's in-memory snapshot → instant render on re-mount
+  const [documents, setDocuments] = useState<DocumentRecord[]>(() =>
+    (recordsService.getCached() ?? []).map(mapDoc)
+  );
+  const [history, setHistory] = useState<StatusHistory[]>(() =>
+    mapHistory(recordsService.getCached() ?? [])
+  );
+  // Only true before the very first local read (or the very first download on a fresh install)
+  const [loading, setLoading] = useState(() => recordsService.getCached() === null);
   const [busy, setBusy] = useState(false);
   const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabId>('Quotation');
   const [successMsg, setSuccessMsg] = useState('');
@@ -3275,10 +3408,12 @@ export default function RecordsSection(): React.JSX.Element {
   } | null>(null);
 
   const [search, setSearch] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentStatus>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('newest');
   const [page, setPage] = useState(1);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const tr: RbTranslations = rbT[language];
   const isRTL = isRTLLang(language);
@@ -3295,14 +3430,25 @@ export default function RecordsSection(): React.JSX.Element {
   };
 
   // ------------------------------------------------------------
-  // DATA LOADING (Supabase via recordsService)
+  // DATA LOADING (local SQLite via recordsService — instant, works offline)
   // ------------------------------------------------------------
   const refresh = useCallback(async (): Promise<DocumentRecord[]> => {
+    let keepLoading = false;
     try {
       const rows = await recordsService.getDocuments();
       const mapped = rows.map(mapDoc);
       setDocuments(mapped);
       setHistory(mapHistory(rows));
+      // Fresh install: nothing local yet and the first download is still running →
+      // don't flash "No records found"; the sync event will refresh us.
+      if (
+        rows.length === 0 &&
+        recordsService.isFirstSyncPending() &&
+        typeof navigator !== 'undefined' &&
+        navigator.onLine
+      ) {
+        keepLoading = true;
+      }
       return mapped;
     } catch (e) {
       console.error('Records load error:', e);
@@ -3311,7 +3457,7 @@ export default function RecordsSection(): React.JSX.Element {
       setTimeout(() => setErrorMsg(''), 3500);
       return [];
     } finally {
-      setLoading(false);
+      if (!keepLoading) setLoading(false);
     }
   }, []);
 
@@ -3322,11 +3468,13 @@ export default function RecordsSection(): React.JSX.Element {
       try {
         const handoff = localStorage.getItem(HANDOFF_VIEW_INVOICE_KEY);
         if (handoff) {
-          localStorage.removeItem(HANDOFF_VIEW_INVOICE_KEY);
           const found = docs.find((d) => d.id === handoff);
           if (found) {
+            localStorage.removeItem(HANDOFF_VIEW_INVOICE_KEY);
             setViewRecord(found);
             setActiveTab(getCategory(found));
+          } else if (!recordsService.isFirstSyncPending()) {
+            localStorage.removeItem(HANDOFF_VIEW_INVOICE_KEY);
           }
         }
       } catch {
@@ -3335,7 +3483,7 @@ export default function RecordsSection(): React.JSX.Element {
     })();
   }, [refresh]);
 
-  // company info for printing (businesses table)
+  // company info for printing (businesses table, cached for offline)
   useEffect(() => {
     void (async () => {
       try {
@@ -3345,6 +3493,38 @@ export default function RecordsSection(): React.JSX.Element {
       }
     })();
   }, []);
+
+  // background sync (push queue / pull remote) + its events
+  useEffect(() => {
+    recordsService.startSyncWorker(); // idempotent
+
+    // Background sync changed local data (e.g. edited on another device) → re-read SQLite
+    const onSynced = (): void => {
+      void refresh();
+    };
+    // Real sync failure (RLS, constraint, balance changed elsewhere, ...) → show the exact reason once
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent<{
+        message: string;
+        details?: string;
+        code?: string;
+      }>).detail;
+      setLoading(false);
+      setErrorInfo({
+        title: rbT[getStoredLanguage()].errSyncRecords,
+        message: d.message,
+        details: d.details,
+        code: d.code,
+      });
+    };
+
+    window.addEventListener('zakhira:records-synced', onSynced);
+    window.addEventListener('zakhira:records-sync-error', onSyncError);
+    return () => {
+      window.removeEventListener('zakhira:records-synced', onSynced);
+      window.removeEventListener('zakhira:records-sync-error', onSyncError);
+    };
+  }, [refresh]);
 
   // refresh when the user returns to the tab / other modules change sales data
   useEffect(() => {
@@ -3398,6 +3578,9 @@ export default function RecordsSection(): React.JSX.Element {
           d.customerSnapshot.phone.toLowerCase().includes(q)
       );
     }
+    if (paymentFilter !== 'all') {
+      list = list.filter((d) => d.paymentStatus === paymentFilter);
+    }
     if (dateFrom) list = list.filter((d) => d.issueDate >= dateFrom);
     if (dateTo) list = list.filter((d) => d.issueDate <= dateTo);
 
@@ -3427,7 +3610,7 @@ export default function RecordsSection(): React.JSX.Element {
         break;
     }
     return list;
-  }, [documents, search, dateFrom, dateTo, sortBy, language]);
+  }, [documents, search, paymentFilter, dateFrom, dateTo, sortBy, language]);
 
   const getStatusLabel = (s: WorkflowStatus): string => statusLabel(tr, s);
   const getDocLabel = (d: DocumentType): string =>
@@ -3495,15 +3678,134 @@ export default function RecordsSection(): React.JSX.Element {
   };
   const clearFilters = (): void => {
     setSearch('');
+    setPaymentFilter('all');
     setDateFrom('');
     setDateTo('');
     setPage(1);
   };
 
-  const hasActiveFilters = search.trim() !== '' || dateFrom !== '' || dateTo !== '';
+  const hasActiveFilters =
+    search.trim() !== '' || paymentFilter !== 'all' || dateFrom !== '' || dateTo !== '';
+
+  const exportCsv = (): void => {
+    try {
+      const header = [
+        tr.colOrderNo,
+        tr.type,
+        tr.colCustomer,
+        tr.colDate,
+        tr.colAmount,
+        tr.currency,
+        tr.colPayment,
+        tr.colStatus,
+      ];
+      const rows = currentList.map((record) => [
+        record.orderNumber,
+        getDocLabel(record.documentType),
+        record.customerSnapshot.name,
+        formatDate(record.issueDate),
+        record.grandTotal,
+        record.currency,
+        payLabel(tr, record.paymentStatus),
+        getStatusLabel(record.status),
+      ]);
+      const csv = [header, ...rows]
+        .map((row) => row.map(csvCell).join(','))
+        .join('\r\n');
+      const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' });
+      downloadExport(blob, `records-${activeTab.toLowerCase()}-${todayISO()}.csv`);
+      showSuccess(tr.exportSuccess);
+    } catch (error) {
+      console.error('Could not export records to CSV:', error);
+      showError(tr.exportFailed);
+    }
+  };
+
+  const exportPdf = async (): Promise<void> => {
+    if (exportingPdf || currentList.length === 0) return;
+    setExportingPdf(true);
+    let wrapper: HTMLDivElement | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const mod = await import('html2pdf.js');
+      const html2pdf = ((mod as { default?: unknown }).default ?? mod) as () => ExportPdfChain;
+      const title = tabsConfig.find((tab) => tab.id === activeTab)?.label ?? activeTab;
+      const headers = [
+        tr.colOrderNo,
+        tr.type,
+        tr.colCustomer,
+        tr.colDate,
+        tr.colAmount,
+        tr.currency,
+        tr.colPayment,
+        tr.colStatus,
+      ];
+      const rows = currentList
+        .map((record) => {
+          const cells = [
+            record.orderNumber,
+            getDocLabel(record.documentType),
+            record.customerSnapshot.name,
+            formatDate(record.issueDate),
+            formatMoney(record.grandTotal),
+            record.currency,
+            payLabel(tr, record.paymentStatus),
+            getStatusLabel(record.status),
+          ];
+          return `<tr>${cells.map((cell) => `<td>${escapeExportHtml(cell)}</td>`).join('')}</tr>`;
+        })
+        .join('');
+
+      wrapper = document.createElement('div');
+      wrapper.style.cssText =
+        'position:fixed;left:-10000px;top:0;width:1120px;overflow:visible;pointer-events:none;';
+      const host = document.createElement('div');
+      host.dir = isRTL ? 'rtl' : 'ltr';
+      host.style.cssText =
+        'box-sizing:border-box;width:1120px;padding:24px;background:#fff;color:#252A28;font-family:Arial,sans-serif;';
+      host.innerHTML = `
+        <h1 style="margin:0 0 6px;color:#123C32;font-size:22px">${escapeExportHtml(title)}</h1>
+        <p style="margin:0 0 18px;color:#66745A;font-size:12px">${escapeExportHtml(todayISO())} · ${currentList.length}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead><tr>${headers
+            .map(
+              (header) =>
+                `<th style="padding:8px 6px;border:1px solid #d5d9d3;background:#123C32;color:#fff;text-align:start">${escapeExportHtml(header)}</th>`
+            )
+            .join('')}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <style>tbody tr:nth-child(even){background:#f7f3ea}td{padding:7px 6px;border:1px solid #d5d9d3;vertical-align:top}</style>
+      `;
+      wrapper.appendChild(host);
+      document.body.appendChild(wrapper);
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+
+      const blob = await html2pdf()
+        .set({
+          margin: 8,
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+          pagebreak: { mode: ['css', 'legacy'] },
+        })
+        .from(host)
+        .outputPdf('blob');
+      downloadExport(blob, `records-${activeTab.toLowerCase()}-${todayISO()}.pdf`);
+      showSuccess(tr.exportSuccess);
+    } catch (error) {
+      console.error('Could not export records to PDF:', error);
+      showError(tr.exportFailed);
+    } finally {
+      wrapper?.remove();
+      setExportingPdf(false);
+    }
+  };
 
   // ------------------------------------------------------------
-  // ACTIONS (all go through recordsService)
+  // ACTIONS (all go through recordsService → local SQLite first,
+  // then queued and pushed to Supabase in the background)
   // ------------------------------------------------------------
   const afterWrite = async (): Promise<DocumentRecord[]> => {
     const docs = await refresh();
@@ -3907,7 +4209,7 @@ ${compactCSS}
             {tr.filters}
           </h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
           <div>
             <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
               {tr.search}
@@ -3928,6 +4230,25 @@ ${compactCSS}
                 style={{ ...INPUT_STYLE, paddingInlineStart: 36 }}
               />
             </div>
+          </div>
+          <div>
+            <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
+              {tr.paymentStatusFilter}
+            </label>
+            <select
+              value={paymentFilter}
+              onChange={(e) => {
+                setPaymentFilter(e.target.value as 'all' | PaymentStatus);
+                setPage(1);
+              }}
+              className={`${rbInputCls} cursor-pointer`}
+              style={INPUT_STYLE}
+            >
+              <option value="all">{tr.allPayments}</option>
+              <option value="Paid">{tr.payPaid}</option>
+              <option value="Unpaid">{tr.payUnpaid}</option>
+              <option value="Partially Paid">{tr.payPartial}</option>
+            </select>
           </div>
           <div>
             <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
@@ -3969,6 +4290,29 @@ ${compactCSS}
               <option value="nameDesc">{tr.sortNameDesc}</option>
               <option value="amountDesc">{tr.sortAmountDesc}</option>
               <option value="amountAsc">{tr.sortAmountAsc}</option>
+            </select>
+          </div>
+          <div>
+            <label className={rbLabelCls} style={{ color: THEME.deepForest }}>
+              {tr.exportLabel}
+            </label>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const format = e.target.value;
+                e.currentTarget.value = '';
+                if (format === 'csv') exportCsv();
+                if (format === 'pdf') void exportPdf();
+              }}
+              disabled={currentList.length === 0 || exportingPdf}
+              className={`${rbInputCls} cursor-pointer disabled:cursor-not-allowed disabled:opacity-50`}
+              style={INPUT_STYLE}
+            >
+              <option value="" disabled>
+                {tr.exportLabel}
+              </option>
+              <option value="csv">{tr.exportCsv}</option>
+              <option value="pdf">{tr.exportPdf}</option>
             </select>
           </div>
         </div>
@@ -4322,6 +4666,13 @@ ${compactCSS}
           isRTL={isRTL}
           onConfirm={handlePrintWithFormat}
           onCancel={() => setPrintTarget(null)}
+        />
+      )}
+      {errorInfo && (
+        <ErrorModal
+          info={errorInfo}
+          okLabel={tr.ok}
+          onClose={() => setErrorInfo(null)}
         />
       )}
     </div>

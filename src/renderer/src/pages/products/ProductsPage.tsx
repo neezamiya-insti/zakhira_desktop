@@ -1536,7 +1536,7 @@ export default function ProductsPage(): React.JSX.Element {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-dark">Inventory — Products</h1>
         <p className="text-supporting mt-1.5 text-sm">
-          Manage products and watch stock levels
+          Manage products and watch stock levels by tauheed khan
         </p>
       </div>
 

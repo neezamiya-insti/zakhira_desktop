@@ -3,19 +3,13 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from 'react';
-import { salesChartsService } from '@renderer/services/salesChartsService';
-
-// ============================================================
-// THEME
-// ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  salesChartsService,
+  type ChartData,
+} from '@renderer/services/salesChartsService';
+import { ACCOUNTING_SYNCED_EVENT } from '@renderer/services/accountingservice';
+import { THEME } from '@renderer/theme/theme';
 
 // ============================================================
 // TYPES
@@ -312,22 +306,20 @@ function ChannelPieChart({ online, offline, tr }: { online: number; offline: num
     const start = angle;
     const end = angle - frac * Math.PI * 2;
     angle = end;
-    const mid = slices.length === 1 ? -Math.PI / 4 : (start + end) / 2;
     const large = frac > 0.5 ? 1 : 0;
-    const cos = Math.cos(mid);
     return {
       ...s,
-      pct: Math.round(frac * 100),
       d: `M ${cx} ${cy} L ${cx + r * Math.cos(start)} ${cy + r * Math.sin(start)} A ${r} ${r} 0 ${large} 0 ${cx + r * Math.cos(end)} ${cy + r * Math.sin(end)} Z`,
-      lx: cx + (r + 12) * cos,
-      ly: cy + (r + 12) * Math.sin(mid),
-      anchor: cos > 0.15 ? 'start' : cos < -0.15 ? 'end' : 'middle',
     };
   });
 
   return (
     <div>
-      <svg viewBox="0 0 340 220" className="w-full h-auto max-w-[280px] mx-auto">
+      <svg
+        viewBox="0 0 340 220"
+        className="w-full h-auto max-w-[280px] mx-auto"
+        style={{ direction: 'ltr' }}
+      >
         {parts.length === 1 ? (
           <circle cx={cx} cy={cy} r={r} fill={parts[0].color} />
         ) : (
@@ -337,21 +329,21 @@ function ChannelPieChart({ online, offline, tr }: { online: number; offline: num
             </path>
           ))
         )}
-        {parts.map((p) => (
-          <text key={`t-${p.label}`} x={p.lx} y={p.ly} textAnchor={p.anchor as 'start' | 'end' | 'middle'} dominantBaseline="middle" fontSize="12" fill={THEME.charcoal}>
-            {p.label} {p.pct}%
-          </text>
-        ))}
       </svg>
 
-      <div className="mt-2 space-y-1">
+      <div className="mt-2 grid gap-1">
         {slices.map((s) => (
-          <div key={s.label} className="flex items-center justify-between text-[10px] font-bold">
-            <span className="flex items-center gap-1.5" style={{ color: THEME.charcoal }}>
+          <div key={s.label} className="flex min-w-0 items-center justify-between gap-2 text-[10px] font-bold">
+            <span className="flex min-w-0 items-center gap-1.5" style={{ color: THEME.charcoal }}>
               <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} />
-              {s.label}
+              <span className="truncate">{s.label}</span>
+              <span className="shrink-0" style={{ color: THEME.mutedOlive }}>
+                <bdi dir="ltr">{Math.round((s.value / total) * 100)}%</bdi>
+              </span>
             </span>
-            <span style={{ color: THEME.mutedOlive }}>{formatMoney(s.value)}</span>
+            <span className="shrink-0" dir="ltr" style={{ color: THEME.mutedOlive }}>
+              {formatMoney(s.value)}
+            </span>
           </div>
         ))}
       </div>
@@ -383,8 +375,11 @@ const heatLevel = (v: number, max: number): number => {
   return 4;
 };
 
-const slotLabel = (h: number): string =>
-  `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`;
+const slotLabel = (h: number, language: Language): string =>
+  new Date(2024, 0, 1, h).toLocaleTimeString(LOCALES[language], {
+    hour: 'numeric',
+    hourCycle: 'h12',
+  });
 
 function OrderPatternsHeat({
   cells,
@@ -416,7 +411,12 @@ function OrderPatternsHeat({
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full h-auto"
+        preserveAspectRatio="xMidYMid meet"
+        style={{ direction: 'ltr' }}
+      >
         {order.map((dayIdx, row) => (
           <g key={dayIdx}>
             <text x={left - 8} y={top + row * cellH + cellH / 2 + 3} textAnchor="end" fontSize="10" fill={THEME.charcoal}>
@@ -426,7 +426,7 @@ function OrderPatternsHeat({
               const lvl = HEAT_LEVELS[heatLevel(v, max)];
               return (
                 <rect key={c} x={left + c * cellW} y={top + row * cellH} width={cellW} height={cellH} fill={lvl.color} fillOpacity={lvl.opacity} stroke="#FFFFFF" strokeWidth={1.2}>
-                  <title>{`${dayName(dayIdx)} ${slotLabel(c * 2)}–${slotLabel(c * 2 + 2)}: ${v} ${tr.orders}`}</title>
+                  <title>{`${dayName(dayIdx)} ${slotLabel(c * 2, language)}–${slotLabel(c * 2 + 2, language)}: ${v} ${tr.orders}`}</title>
                 </rect>
               );
             })}
@@ -434,7 +434,7 @@ function OrderPatternsHeat({
         ))}
         {Array.from({ length: slots }, (_, c) => (
           <text key={c} x={left + c * cellW + cellW / 2} y={H - 10} textAnchor="middle" fontSize="9" fill={THEME.charcoal}>
-            {slotLabel(c * 2)}
+            {slotLabel(c * 2, language)}
           </text>
         ))}
       </svg>
@@ -586,22 +586,26 @@ function InvoiceStatusDonut({ slices, tr }: { slices: StatusSlice[]; tr: TrType 
 // ============================================================
 export default function SalesCharts(): React.JSX.Element {
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
-  const [chartData, setChartData] = useState<{
-    monthlySales: { month: string; value: number }[];
-    onlineSales: number;
-    offlineSales: number;
-    topProducts: { name: string; qty: number; revenue: number }[];
-    statusCounts: { paid: number; partial: number; unpaid: number; pending: number; rejected: number };
-    orderPatterns: number[][];
-  }>({
-    monthlySales: [],
-    onlineSales: 0,
-    offlineSales: 0,
-    topProducts: [],
-    statusCounts: { paid: 0, partial: 0, unpaid: 0, pending: 0, rejected: 0 },
-    orderPatterns: Array.from({ length: 7 }, () => Array(12).fill(0)),
-  });
-  const [loading, setLoading] = useState(true);
+  const [chartData, setChartData] = useState<ChartData>(
+    () =>
+      salesChartsService.getCachedChartData() || {
+        monthlySales: [],
+        onlineSales: 0,
+        offlineSales: 0,
+        topProducts: [],
+        statusCounts: {
+          paid: 0,
+          partial: 0,
+          unpaid: 0,
+          pending: 0,
+          rejected: 0,
+        },
+        orderPatterns: Array.from({ length: 7 }, () => Array(12).fill(0)),
+      }
+  );
+  const [loading, setLoading] = useState(
+    () => salesChartsService.getCachedChartData() === null
+  );
 
   // Sync language changes
   useEffect(() => {
@@ -616,33 +620,57 @@ export default function SalesCharts(): React.JSX.Element {
     };
   }, []);
 
-  // Fetch data from Supabase
-  const fetchCharts = async () => {
+  // Show local data first; refresh from Supabase only after local loading finishes.
+  const fetchCharts = useCallback(async (syncOnline = false): Promise<void> => {
     try {
-      setLoading(true);
       const data = await salesChartsService.getChartData();
       setChartData(data);
-    } catch (err: any) {
-      console.error('Failed to load charts:', err.message);
+    } catch (error) {
+      console.error('Failed to load local sales charts:', error);
     } finally {
       setLoading(false);
     }
-  };
 
-  useEffect(() => {
-    fetchCharts();
+    if (syncOnline && typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        const data = await salesChartsService.syncChartData();
+        setChartData(data);
+      } catch (error) {
+        console.error('Failed to sync sales charts:', error);
+      }
+    }
   }, []);
 
-  // Refresh when RecordsSection changes something
   useEffect(() => {
-    const refresh = () => fetchCharts();
-    window.addEventListener('zakhira:sales-updated', refresh);
-    window.addEventListener('focus', refresh);
-    return () => {
-      window.removeEventListener('zakhira:sales-updated', refresh);
-      window.removeEventListener('focus', refresh);
+    void fetchCharts(true);
+  }, [fetchCharts]);
+
+  // Local writes and background pulls should refresh charts without network latency.
+  useEffect(() => {
+    let localRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshLocal = (): void => {
+      if (localRefreshTimer) clearTimeout(localRefreshTimer);
+      localRefreshTimer = setTimeout(() => {
+        void fetchCharts();
+      }, 100);
     };
-  }, []);
+    const syncOnline = (): void => {
+      void fetchCharts(true);
+    };
+    window.addEventListener('zakhira:sales-updated', refreshLocal);
+    window.addEventListener('zakhira:records-synced', refreshLocal);
+    window.addEventListener(ACCOUNTING_SYNCED_EVENT, refreshLocal);
+    window.addEventListener('online', syncOnline);
+    window.addEventListener('focus', syncOnline);
+    return () => {
+      window.removeEventListener('zakhira:sales-updated', refreshLocal);
+      window.removeEventListener('zakhira:records-synced', refreshLocal);
+      window.removeEventListener(ACCOUNTING_SYNCED_EVENT, refreshLocal);
+      window.removeEventListener('online', syncOnline);
+      window.removeEventListener('focus', syncOnline);
+      if (localRefreshTimer) clearTimeout(localRefreshTimer);
+    };
+  }, [fetchCharts]);
 
   const tr: TrType = t[language];
   const isRTL = isRTLLang(language);

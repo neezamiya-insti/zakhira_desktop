@@ -8,6 +8,9 @@ import {
   accountingChartsService,
   type ChartsData,
 } from '@renderer/services/accountingchartsservice';
+import { ACCOUNTING_SYNCED_EVENT } from '@renderer/services/accountingservice';
+import { ORDERS_SYNCED_EVENT } from '@renderer/services/orderservice';
+import { SALES_SYNCED_EVENT } from '@renderer/services/salesService';
 
 // Extra accent colours used only by the charts
 // (agar chahein to inhein theme.ts mein move kar sakte hain)
@@ -59,6 +62,7 @@ const DASH_T = {
     salaries: 'Salaries',
     personalUse: 'Personal Use',
     other: 'Other',
+    purchases: 'Purchases',
     cogs: 'Cost of Goods Sold',
     levelVeryLow: 'Very Low',
     levelLow: 'Low',
@@ -84,6 +88,7 @@ const DASH_T = {
     salaries: 'الرواتب',
     personalUse: 'استخدام شخصي',
     other: 'أخرى',
+    purchases: 'المشتريات',
     cogs: 'تكلفة البضاعة المباعة',
     levelVeryLow: 'منخفض جداً',
     levelLow: 'منخفض',
@@ -109,6 +114,7 @@ const DASH_T = {
     salaries: 'تنخواہیں',
     personalUse: 'ذاتی استعمال',
     other: 'دیگر',
+    purchases: 'خریداری',
     cogs: 'فروخت شدہ اشیاء کی لاگت',
     levelVeryLow: 'بہت کم',
     levelLow: 'کم',
@@ -134,6 +140,7 @@ const DASH_T = {
     salaries: 'वेतन',
     personalUse: 'व्यक्तिगत उपयोग',
     other: 'अन्य',
+    purchases: 'खरीदारी',
     cogs: 'बेचे गए माल की लागत',
     levelVeryLow: 'बहुत कम',
     levelLow: 'कम',
@@ -163,21 +170,28 @@ const formatPrice = (n: number, lang: Language = 'en'): string => {
   return `${negative ? '-' : ''}${currency} ${formatted}`;
 };
 
-const formatShortMonth = (key: string): string => {
+const formatShortMonth = (key: string, language: Language): string => {
   const [y, m] = key.split('-');
   const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+  return d.toLocaleDateString(LOCALES[language], {
+    month: 'short',
+    year: '2-digit',
+  });
 };
 
-const compact = (n: number): string => {
+const compact = (n: number, language: Language = 'en'): string => {
   const a = Math.abs(n);
-  const s =
+  const value =
     a >= 1e6
-      ? `${(a / 1e6).toFixed(1)}M`
+      ? a / 1e6
       : a >= 1e3
-        ? `${(a / 1e3).toFixed(1)}k`
-        : a.toFixed(0);
-  return n < 0 ? `-${s}` : s;
+        ? a / 1e3
+        : a;
+  const suffix = a >= 1e6 ? 'M' : a >= 1e3 ? 'k' : '';
+  const s = value.toLocaleString(LOCALES[language], {
+    maximumFractionDigits: a >= 1e3 ? 1 : 0,
+  });
+  return `${n < 0 ? '-' : ''}${s}${suffix}`;
 };
 
 const niceMax = (v: number): number => {
@@ -236,9 +250,13 @@ function EmptyChart({
 function RevenueExpensesProfitChart({
   data,
   tr,
+  language,
+  rtl,
 }: {
   data: MonthlyBucket[];
   tr: DashT;
+  language: Language;
+  rtl: boolean;
 }): React.JSX.Element {
   const rows = data.slice(-6);
   if (rows.length === 0) return <EmptyChart tr={tr} height={192} />;
@@ -275,6 +293,7 @@ function RevenueExpensesProfitChart({
       viewBox={`0 0 ${W} ${H}`}
       className="w-full h-auto"
       preserveAspectRatio="xMidYMid meet"
+      direction="ltr"
     >
       {ticks.map((r) => {
         const y = pad.top + iH * (1 - r);
@@ -296,7 +315,7 @@ function RevenueExpensesProfitChart({
               fontSize="12"
               fill={THEME.charcoal}
             >
-              {compact(leftMax * r)}
+              {compact(leftMax * r, language)}
             </text>
             <text
               x={W - pad.right + 10}
@@ -305,7 +324,7 @@ function RevenueExpensesProfitChart({
               fontSize="12"
               fill={THEME.charcoal}
             >
-              {compact(rMin + (rTop - rMin) * r)}
+              {compact(rMin + (rTop - rMin) * r, language)}
             </text>
           </g>
         );
@@ -344,7 +363,7 @@ function RevenueExpensesProfitChart({
             height={hL(b.revenue)}
             fill={THEME.deepForest}
           >
-            <title>{`${b.label} — ${tr.revenue}: ${formatPrice(b.revenue)}`}</title>
+            <title>{`${b.label} — ${tr.revenue}: ${formatPrice(b.revenue, language)}`}</title>
           </rect>
           <rect
             x={xC(i) + 1}
@@ -353,7 +372,7 @@ function RevenueExpensesProfitChart({
             height={hL(b.expenses)}
             fill={ACCENT.danger}
           >
-            <title>{`${b.label} — ${tr.expenses}: ${formatPrice(b.expenses)}`}</title>
+            <title>{`${b.label} — ${tr.expenses}: ${formatPrice(b.expenses, language)}`}</title>
           </rect>
         </g>
       ))}
@@ -376,13 +395,15 @@ function RevenueExpensesProfitChart({
             stroke="#FFFFFF"
             strokeWidth={1.5}
           >
-            <title>{`${b.label} — ${tr.profit}: ${formatPrice(b.profit)}`}</title>
+            <title>{`${b.label} — ${tr.profit}: ${formatPrice(b.profit, language)}`}</title>
           </circle>
           <text
             x={xC(i)}
             y={H - 12}
             textAnchor="middle"
-            fontSize="12"
+            direction={rtl ? 'rtl' : 'ltr'}
+            unicodeBidi="plaintext"
+            fontSize="10"
             fill={THEME.charcoal}
           >
             {b.label}
@@ -479,7 +500,7 @@ function CashFlowHeatChart({
                   stroke="#FFFFFF"
                   strokeWidth={1.5}
                 >
-                  <title>{`${dayName(dayIdx)} • ${heat.labels[c]} — ${tr.activity}: ${formatPrice(v)}`}</title>
+                  <title>{`${dayName(dayIdx)} • ${heat.labels[c]} — ${tr.activity}: ${formatPrice(v, language)}`}</title>
                 </rect>
               );
             })}
@@ -529,11 +550,15 @@ function CashFlowHeatChart({
 function MonthlyCheckChart({
   data,
   tr,
+  language,
+  rtl,
 }: {
   data: MonthlyBucket[];
   tr: DashT;
+  language: Language;
+  rtl: boolean;
 }): React.JSX.Element {
-  const rows = data.slice(-4);
+  const rows = data.slice(-2);
   if (rows.length === 0) return <EmptyChart tr={tr} height={160} />;
 
   const series: {
@@ -553,7 +578,7 @@ function MonthlyCheckChart({
   const groupH = series.length * barH + (series.length - 1) * barGap;
 
   const W = 600;
-  const pad = { top: 18, right: 64, bottom: 40, left: 80 };
+  const pad = { top: 18, right: 64, bottom: 40, left: rtl ? 132 : 104 };
   const iW = W - pad.left - pad.right;
   const iH = rows.length * groupH + (rows.length - 1) * groupGap;
   const H = pad.top + iH + pad.bottom;
@@ -573,6 +598,7 @@ function MonthlyCheckChart({
         viewBox={`0 0 ${W} ${H}`}
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
+        direction="ltr"
       >
         {ticks.map((r) => (
           <g key={r}>
@@ -593,7 +619,7 @@ function MonthlyCheckChart({
               fontSize="12"
               fill={THEME.charcoal}
             >
-              {compact(maxV * r)}
+              {compact(maxV * r, language)}
             </text>
           </g>
         ))}
@@ -605,8 +631,10 @@ function MonthlyCheckChart({
               <text
                 x={pad.left - 8}
                 y={gy + groupH / 2 + 4}
-                textAnchor="end"
-                fontSize="12"
+                textAnchor={rtl ? 'start' : 'end'}
+                direction={rtl ? 'rtl' : 'ltr'}
+                unicodeBidi="plaintext"
+                fontSize="11"
                 fill={THEME.mutedOlive}
               >
                 {m.label}
@@ -635,7 +663,7 @@ function MonthlyCheckChart({
                       height={barH}
                       fill={s.color}
                     >
-                      <title>{`${m.label} — ${s.label}: ${formatPrice(v)}`}</title>
+                      <title>{`${m.label} — ${s.label}: ${formatPrice(v, language)}`}</title>
                     </rect>
                     <text
                       x={x(v) + 6}
@@ -644,7 +672,7 @@ function MonthlyCheckChart({
                       fontWeight="700"
                       fill={THEME.charcoal}
                     >
-                      {compact(v)}
+                      {compact(v, language)}
                     </text>
                   </g>
                 );
@@ -802,17 +830,32 @@ function ExpensePieChart({
 // 🚀 MAIN COMPONENT (zero props — data accountingChartsService se)
 // ============================================================
 export default function AccountingCharts(): React.JSX.Element {
-  const language = getStoredLanguage();
+  const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
   const tr = DASH_T[language];
   const rtl = isRTLLang(language);
 
-  const [data, setData] = useState<ChartsData | null>(null);
+  const [data, setData] = useState<ChartsData | null>(() =>
+    accountingChartsService.getCachedChartsData()
+  );
   const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const syncLanguage = (): void => setLanguage(getStoredLanguage());
+    window.addEventListener('focus', syncLanguage);
+    window.addEventListener('storage', syncLanguage);
+    return () => {
+      window.removeEventListener('focus', syncLanguage);
+      window.removeEventListener('storage', syncLanguage);
+    };
+  }, []);
 
   // sirf sabse naya request apna result set kare (race condition se bachao)
   const requestId = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const cached = accountingChartsService.getCachedChartsData();
+    if (cached) setData(cached);
+
     const myId = ++requestId.current;
     try {
       const d = await accountingChartsService.getChartsData();
@@ -827,20 +870,35 @@ export default function AccountingCharts(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const reload = (): void => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        reloadTimer = null;
+        void load();
+      }, 100);
+    };
+
+    window.addEventListener('focus', reload);
+    window.addEventListener('online', reload);
+    window.addEventListener('zakhira:sales-updated', reload as EventListener);
+    window.addEventListener(ACCOUNTING_SYNCED_EVENT, reload);
+    window.addEventListener(ORDERS_SYNCED_EVENT, reload);
+    window.addEventListener(SALES_SYNCED_EVENT, reload);
     void load();
 
-    const reload = (): void => {
-      void load();
-    };
-    window.addEventListener('focus', reload);
-    window.addEventListener('zakhira:sales-updated', reload as EventListener);
     return () => {
       requestId.current++; // unmount ke baad koi setState na ho
+      if (reloadTimer) clearTimeout(reloadTimer);
       window.removeEventListener('focus', reload);
+      window.removeEventListener('online', reload);
       window.removeEventListener(
         'zakhira:sales-updated',
         reload as EventListener
       );
+      window.removeEventListener(ACCOUNTING_SYNCED_EVENT, reload);
+      window.removeEventListener(ORDERS_SYNCED_EVENT, reload);
+      window.removeEventListener(SALES_SYNCED_EVENT, reload);
     };
   }, [load]);
 
@@ -854,7 +912,10 @@ export default function AccountingCharts(): React.JSX.Element {
     );
 
     const monthly: MonthlyBucket[] = hasActivity
-      ? data.months.map((m) => ({ ...m, label: formatShortMonth(m.key) }))
+      ? data.months.map((m) => ({
+          ...m,
+          label: formatShortMonth(m.key, language),
+        }))
       : [];
 
     const heat: HeatData = hasActivity
@@ -864,13 +925,14 @@ export default function AccountingCharts(): React.JSX.Element {
     const t = data.expenseTotals;
     const slices: PieSlice[] = [
       { name: tr.cogs, amount: t.cogs, color: THEME.warmBrass },
+      { name: tr.purchases, amount: t.purchases ?? 0, color: THEME.deepForest },
       { name: tr.salaries, amount: t.salaries, color: ACCENT.purple },
       { name: tr.personalUse, amount: t.personalUse, color: ACCENT.danger },
       { name: tr.other, amount: t.other, color: THEME.mutedOlive },
     ].filter((s) => s.amount > 0);
 
     return { monthly, heat, slices };
-  }, [data, tr]);
+  }, [data, tr, language]);
 
   const cardStyle = {
     backgroundColor: '#FFFFFF',
@@ -966,7 +1028,12 @@ export default function AccountingCharts(): React.JSX.Element {
               </span>
             </div>
           </div>
-          <RevenueExpensesProfitChart data={view.monthly} tr={tr} />
+          <RevenueExpensesProfitChart
+            data={view.monthly}
+            tr={tr}
+            language={language}
+            rtl={rtl}
+          />
         </div>
 
         {/* Cash Flow (Heatmap) */}
@@ -988,7 +1055,12 @@ export default function AccountingCharts(): React.JSX.Element {
           >
             {tr.monthlyCheck}
           </h3>
-          <MonthlyCheckChart data={view.monthly} tr={tr} />
+          <MonthlyCheckChart
+            data={view.monthly}
+            tr={tr}
+            language={language}
+            rtl={rtl}
+          />
         </div>
 
         {/* Expense Breakdown */}

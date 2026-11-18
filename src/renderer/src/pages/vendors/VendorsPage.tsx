@@ -6,9 +6,11 @@ import { THEME } from '@renderer/theme/theme';
 import {
   vendorsService,
   VendorHasOrdersError,
+  VENDORS_SYNCED_EVENT,
+  VENDORS_SYNC_ERROR_EVENT,
   type Vendor,
   type VendorInput,
-} from '@renderer/services/vendorsservice';
+} from '@renderer/services/vendorService';
 
 // ============================================================
 // 🌍 LANGUAGE
@@ -53,6 +55,9 @@ const t = {
     phoneLabel: 'Phone number',
     phonePh: '+966 50 123 4567',
     phoneHint: 'Include the country code so WhatsApp works.',
+    vatNumber: 'VAT Number',
+    vatNumberPh: 'e.g. 300123456700003',
+    vatNumberHint: 'Optional tax registration number.',
     cityLabel: 'City',
     cityPh: 'Riyadh',
     addressLabel: 'Address',
@@ -100,6 +105,7 @@ const t = {
       `${name} has ${count} order${count === 1 ? '' : 's'} and cannot be deleted. Deactivate it instead.`,
     errDeleteStorage: 'Could not delete the vendor. Please try again.',
     errUpdateStorage: 'Could not update the vendor. Please try again.',
+    syncFailed: 'Sync failed',
     loading: 'Loading vendors...',
     loadError: 'Could not load vendors. Check your connection and try again.',
     retry: 'Retry',
@@ -148,6 +154,9 @@ const t = {
     phoneLabel: 'رقم الهاتف',
     phonePh: '+966 50 123 4567',
     phoneHint: 'أدخل رمز الدولة حتى يعمل واتساب.',
+    vatNumber: 'الرقم الضريبي',
+    vatNumberPh: 'مثال: 300123456700003',
+    vatNumberHint: 'رقم التسجيل الضريبي (اختياري).',
     cityLabel: 'المدينة',
     cityPh: 'الرياض',
     addressLabel: 'العنوان',
@@ -195,6 +204,7 @@ const t = {
       `${name} لديه ${count} ${count === 1 ? 'طلب' : 'طلبات'} ولا يمكن حذفه. عطّله بدلاً من ذلك.`,
     errDeleteStorage: 'تعذر حذف المورد. حاول مرة أخرى.',
     errUpdateStorage: 'تعذر تحديث المورد. حاول مرة أخرى.',
+    syncFailed: 'فشلت المزامنة',
     loading: 'جارٍ تحميل الموردين...',
     loadError: 'تعذر تحميل الموردين. تحقق من الاتصال وحاول مرة أخرى.',
     retry: 'إعادة المحاولة',
@@ -243,6 +253,9 @@ const t = {
     phoneLabel: 'فون نمبر',
     phonePh: '+966 50 123 4567',
     phoneHint: 'ملکی کوڈ شامل کریں تاکہ واٹس ایپ کام کرے۔',
+    vatNumber: 'VAT نمبر',
+    vatNumberPh: 'مثلاً 300123456700003',
+    vatNumberHint: 'ٹیکس رجسٹریشن نمبر (اختیاری)۔',
     cityLabel: 'شہر',
     cityPh: 'ریاض',
     addressLabel: 'پتہ',
@@ -290,6 +303,7 @@ const t = {
       `${name} کے پاس ${count} ${count === 1 ? 'آرڈر' : 'آرڈرز'} ہیں اور اسے حذف نہیں کیا جا سکتا۔ اسے غیر فعال کریں۔`,
     errDeleteStorage: 'وینڈر حذف نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
     errUpdateStorage: 'وینڈر اپ ڈیٹ نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
+    syncFailed: 'سنک ناکام ہو گیا',
     loading: 'وینڈرز لوڈ ہو رہے ہیں...',
     loadError: 'وینڈرز لوڈ نہیں ہو سکے۔ کنکشن چیک کریں اور دوبارہ کوشش کریں۔',
     retry: 'دوبارہ کوشش کریں',
@@ -338,6 +352,9 @@ const t = {
     phoneLabel: 'फ़ोन नंबर',
     phonePh: '+966 50 123 4567',
     phoneHint: 'देश कोड शामिल करें ताकि WhatsApp काम करे।',
+    vatNumber: 'VAT नंबर',
+    vatNumberPh: 'जैसे 300123456700003',
+    vatNumberHint: 'कर पंजीकरण संख्या (वैकल्पिक)।',
     cityLabel: 'शहर',
     cityPh: 'रियाद',
     addressLabel: 'पता',
@@ -385,6 +402,7 @@ const t = {
       `${name} के पास ${count} ऑर्डर हैं और इसे हटाया नहीं जा सकता। इसके बजाय निष्क्रिय करें।`,
     errDeleteStorage: 'विक्रेता हटाया नहीं जा सका। फिर कोशिश करें।',
     errUpdateStorage: 'विक्रेता अपडेट नहीं हो सका। फिर कोशिश करें।',
+    syncFailed: 'सिंक विफल रहा',
     loading: 'विक्रेता लोड हो रहे हैं...',
     loadError: 'विक्रेता लोड नहीं हो सके। कनेक्शन जाँचें और फिर कोशिश करें।',
     retry: 'पुनः प्रयास',
@@ -709,7 +727,7 @@ function Modal({
 }
 
 // ============================================================
-// VENDOR FORM MODAL  (ab vendorsService se save hota hai)
+// VENDOR FORM MODAL  (local SQLite mein save hota hai → instant, offline bhi)
 // ============================================================
 function VendorFormModal({
   vendor,
@@ -726,6 +744,7 @@ function VendorFormModal({
     name: vendor?.name ?? '',
     companyName: vendor?.companyName ?? '',
     phone: vendor?.phone ?? '',
+    vatNumber: vendor?.vatNumber ?? '',
     address: vendor?.address ?? '',
     city: vendor?.city ?? '',
   });
@@ -735,7 +754,8 @@ function VendorFormModal({
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // naye vendor ki ID server se aati hai (sirf dikhane ke liye; save par dobara banti hai)
+  // naye vendor ki ID local data se aati hai (instant, offline bhi);
+  // save par dobara lock ke andar banti hai taake duplicate na ho
   const [uniqueId, setUniqueId] = useState(vendor?.uniqueId ?? '');
   useEffect(() => {
     if (vendor) return;
@@ -770,6 +790,7 @@ function VendorFormModal({
       name: form.name.trim(),
       companyName: form.companyName.trim(),
       phone: normalizePhone(form.phone),
+      vatNumber: form.vatNumber.trim(),
       address: form.address.trim(),
       city: form.city.trim(),
     };
@@ -880,6 +901,25 @@ function VendorFormModal({
               {tr.phoneHint}
             </p>
           )}
+        </div>
+        <div>
+          <label className={labelCls} style={{ color: THEME.charcoal }}>
+            {tr.vatNumber}
+          </label>
+          <input
+            value={form.vatNumber}
+            onChange={(e) => set('vatNumber', e.target.value)}
+            placeholder={tr.vatNumberPh}
+            maxLength={40}
+            className={`${inputCls} font-mono`}
+            style={inputStyle()}
+          />
+          <p
+            className="text-[9px] mt-1 px-2"
+            style={{ color: THEME.mutedOlive }}
+          >
+            {tr.vatNumberHint}
+          </p>
         </div>
         <div>
           <label className={labelCls} style={{ color: THEME.charcoal }}>
@@ -1266,9 +1306,23 @@ export default function VendorsPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [orderCounts, setOrderCounts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
+  // event listeners (registered once) must always see the CURRENT language
+  const trRef = useRef(tr);
+  useEffect(() => {
+    trRef.current = tr;
+  });
+
+  // First paint: in-memory snapshot (instant on re-mount), else empty.
+  // The real data comes from local SQLite a few milliseconds later.
+  const [vendors, setVendors] = useState<Vendor[]>(
+    () => vendorsService.getCachedSnapshot()?.vendors ?? []
+  );
+  const [orderCounts, setOrderCounts] = useState<Record<string, number>>(
+    () => vendorsService.getCachedSnapshot()?.orderCounts ?? {}
+  );
+  const [loading, setLoading] = useState(
+    () => vendorsService.getCachedSnapshot() === null
+  );
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -1288,8 +1342,20 @@ export default function VendorsPage(): React.JSX.Element {
   >('Active');
   const [page, setPage] = useState(1);
 
+  const showSuccess = (msg: string): void => {
+    setSuccessMsg(msg);
+    setErrorMsg('');
+    setTimeout(() => setSuccessMsg(''), 2500);
+  };
+
+  const showError = (msg: string, ms = 3500): void => {
+    setErrorMsg(msg);
+    setSuccessMsg('');
+    setTimeout(() => setErrorMsg(''), ms);
+  };
+
   // ----------------------------------------------------------
-  // DATA LOADING (Supabase via vendorsService)
+  // DATA LOADING (local SQLite via vendorsService — instant, works offline)
   // ----------------------------------------------------------
   // sirf sabse naya request apna result set kare (race condition se bachao)
   const requestId = useRef(0);
@@ -1317,27 +1383,48 @@ export default function VendorsPage(): React.JSX.Element {
 
   useEffect(() => {
     void load();
+    vendorsService.startSyncWorker();
+
     const onFocus = (): void => {
       void load(true);
     };
+    // Background sync changed local data → re-read SQLite
+    const onSynced = (): void => {
+      void load(true);
+    };
+    // Real (non-offline) sync problem
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent).detail as
+        | {
+            message?: string;
+            code?: string;
+            name?: string;
+            uniqueId?: string;
+            count?: number;
+          }
+        | undefined;
+      const cur = trRef.current;
+      // 23503 + vendor info = a DELETE blocked because of purchase orders
+      if (d?.code === '23503' && (d.name || d.uniqueId)) {
+        showError(
+          cur.errHasOrders(d.name || d.uniqueId || '', d.count ?? 1),
+          5000
+        );
+        return;
+      }
+      showError(`${cur.syncFailed}: ${d?.message ?? ''}`, 6000);
+    };
+
     window.addEventListener('focus', onFocus);
+    window.addEventListener(VENDORS_SYNCED_EVENT, onSynced);
+    window.addEventListener(VENDORS_SYNC_ERROR_EVENT, onSyncError);
     return () => {
       requestId.current++; // unmount ke baad koi setState na ho
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener(VENDORS_SYNCED_EVENT, onSynced);
+      window.removeEventListener(VENDORS_SYNC_ERROR_EVENT, onSyncError);
     };
   }, [load]);
-
-  const showSuccess = (msg: string): void => {
-    setSuccessMsg(msg);
-    setErrorMsg('');
-    setTimeout(() => setSuccessMsg(''), 2500);
-  };
-
-  const showError = (msg: string): void => {
-    setErrorMsg(msg);
-    setSuccessMsg('');
-    setTimeout(() => setErrorMsg(''), 3500);
-  };
 
   const uniqueCities = useMemo(() => {
     const set = new Set<string>();
@@ -1413,6 +1500,9 @@ export default function VendorsPage(): React.JSX.Element {
     if (busy) return;
     setBusy(true);
     try {
+      // removed from SQLite instantly; the DELETE is queued for Supabase.
+      // If Supabase refuses (purchase orders) the sync error event tells the
+      // user and the vendor is restored by the next pull.
       await vendorsService.deleteVendor(v.id);
       showSuccess(tr.toastDeleted(v.uniqueId));
       await load(true);

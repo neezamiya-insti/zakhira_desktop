@@ -2,22 +2,20 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable prettier/prettier */
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { THEME } from '@renderer/theme/theme';
+import {
+  reportsService,
+  getLastClosedWeek,
+  getWeekKey,
+  formatWeekLabel,
+  type WeeklyReportData,
+} from "@renderer/services/reportsservice"
 
 // ============================================================
-// 🎨 THEME
+// TYPES (kept exported — other files may import them from here)
 // ============================================================
-const THEME = {
-  warmIvory: '#F7F3EA',
-  deepForest: '#123C32',
-  mutedOlive: '#66745A',
-  charcoal: '#252A28',
-  warmBrass: '#C49A5A',
-};
-
-// ============================================================
-// TYPES
-// ============================================================
+export type { WeeklyReportData };
 export type TransactionType = 'In' | 'Out' | 'Return';
 export type PaymentMode = 'Cash' | 'Card' | 'Bank Transfer' | 'Other';
 export type TransactionStatus =
@@ -26,51 +24,8 @@ export type TransactionStatus =
   | 'Pending'
   | 'Returned';
 
-type Transaction = {
-  id: string;
-  transactionNo: string;
-  date: string;
-  customerName: string;
-  companyName: string;
-  invoiceRef: string;
-  type: TransactionType;
-  amount: number;
-  status: TransactionStatus;
-  mode: PaymentMode;
-  sourceDocumentId?: string;
-  amountPaid?: number;
-  balanceDue?: number;
-};
-
-export type WeeklyReportData = {
-  weekKey: string;
-  label: string;
-  startISO: string;
-  endISO: string;
-
-  totalSales: number;
-  totalPaymentsReceived: number;
-  outstandingBalances: number;
-
-  totalPurchases: number;
-  totalExpenses: number;
-
-  netProfitLoss: number;
-
-  paymentsByMethod: Record<string, number>;
-
-  partialPaymentsReceived: number;
-  amountStillDue: number;
-
-  topSellingProducts: Array<{ name: string; qty: number; revenue: number }>;
-
-  generatedAt: string;
-
-  // Flag to identify sample/demo reports
-  isSample?: boolean;
-  // Flag for the week that is still running (updates automatically)
-  isLive?: boolean;
-};
+/** Set to false to hide the 4 demo (SAMPLE) reports */
+const SHOW_SAMPLES = true;
 
 // ============================================================
 // ⏱️ AUTO-GENERATE SCHEDULE
@@ -174,6 +129,9 @@ const t = {
       'First report will be available after the current week closes on Friday.',
     noReportsAtAll: 'No reports yet',
     reportsCount: (n: number) => `${n} report${n !== 1 ? 's' : ''}`,
+    generatedReportsTitle: 'Generated Reports',
+    noGeneratedReports: 'Reports you generate will appear here for later download.',
+    generatedReportsSaveError: 'Could not save this report to generated history.',
     wTotalSales: 'Total Sales',
     wPaymentsReceived: 'Total Payments Received',
     wOutstanding: 'Outstanding Balances',
@@ -235,6 +193,11 @@ const t = {
     unitWeeks: 'Weeks',
     uWeek: 'w',
     autoDone: 'Report generated once. Turn Auto ON or choose a time to generate again.',
+    // ---- data loading ----
+    reportsLoading: 'Loading reports...',
+    reportsOffline: 'Offline — showing the last saved reports',
+    reportsLoadError: 'Could not load reports. Please try again.',
+    retry: 'Retry',
   },
   ar: {
     pageTitle: 'التقارير الأسبوعية',
@@ -257,6 +220,9 @@ const t = {
       'أول تقرير سيكون متاحًا بعد إغلاق الأسبوع الحالي يوم الجمعة.',
     noReportsAtAll: 'لا توجد تقارير بعد',
     reportsCount: (n: number) => `${n} تقرير`,
+    generatedReportsTitle: 'التقارير المُنشأة',
+    noGeneratedReports: 'ستظهر التقارير التي تنشئها هنا لتنزيلها لاحقًا.',
+    generatedReportsSaveError: 'تعذر حفظ التقرير في سجل التقارير المُنشأة.',
     wTotalSales: 'إجمالي المبيعات',
     wPaymentsReceived: 'إجمالي المدفوعات المستلمة',
     wOutstanding: 'الأرصدة المستحقة',
@@ -318,6 +284,11 @@ const t = {
     unitWeeks: 'أسابيع',
     uWeek: 'أسبوع',
     autoDone: 'تم إنشاء التقرير مرة واحدة. شغّل التلقائي أو اختر وقتًا لإنشائه مرة أخرى.',
+    // ---- data loading ----
+    reportsLoading: 'جارٍ تحميل التقارير...',
+    reportsOffline: 'غير متصل — يتم عرض آخر التقارير المحفوظة',
+    reportsLoadError: 'تعذر تحميل التقارير. حاول مرة أخرى.',
+    retry: 'إعادة المحاولة',
   },
   ur: {
     pageTitle: 'ہفتہ وار رپورٹس',
@@ -340,6 +311,9 @@ const t = {
       'پہلی رپورٹ موجودہ ہفتہ جمعہ کو ختم ہونے کے بعد دستیاب ہوگی۔',
     noReportsAtAll: 'ابھی کوئی رپورٹ نہیں',
     reportsCount: (n: number) => `${n} رپورٹس`,
+    generatedReportsTitle: 'تیار کردہ رپورٹس',
+    noGeneratedReports: 'آپ کی بنائی ہوئی رپورٹس بعد میں ڈاؤن لوڈ کرنے کے لیے یہاں آئیں گی۔',
+    generatedReportsSaveError: 'رپورٹ کو تیار کردہ رپورٹس کی فہرست میں محفوظ نہیں کیا جا سکا۔',
     wTotalSales: 'کل فروخت',
     wPaymentsReceived: 'کل موصولہ ادائیگیاں',
     wOutstanding: 'واجب الادا بیلنس',
@@ -401,6 +375,11 @@ const t = {
     unitWeeks: 'ہفتے',
     uWeek: 'ہفتہ',
     autoDone: 'رپورٹ ایک بار بن گئی۔ دوبارہ بنانے کے لیے آٹو آن کریں یا وقت منتخب کریں۔',
+    // ---- data loading ----
+    reportsLoading: 'رپورٹس لوڈ ہو رہی ہیں...',
+    reportsOffline: 'آف لائن — آخری محفوظ رپورٹس دکھائی جا رہی ہیں',
+    reportsLoadError: 'رپورٹس لوڈ نہیں ہو سکیں۔ دوبارہ کوشش کریں۔',
+    retry: 'دوبارہ کوشش کریں',
   },
   hi: {
     pageTitle: 'साप्ताहिक रिपोर्ट',
@@ -423,6 +402,9 @@ const t = {
       'पहली रिपोर्ट चालू सप्ताह शुक्रवार को बंद होने के बाद उपलब्ध होगी।',
     noReportsAtAll: 'अभी कोई रिपोर्ट नहीं',
     reportsCount: (n: number) => `${n} रिपोर्ट`,
+    generatedReportsTitle: 'बनाई गई रिपोर्ट',
+    noGeneratedReports: 'आपकी बनाई गई रिपोर्ट बाद में डाउनलोड करने के लिए यहाँ दिखेंगी।',
+    generatedReportsSaveError: 'रिपोर्ट को बनाई गई रिपोर्ट की सूची में सेव नहीं किया जा सका।',
     wTotalSales: 'कुल बिक्री',
     wPaymentsReceived: 'कुल प्राप्त भुगतान',
     wOutstanding: 'बकाया शेष',
@@ -484,6 +466,11 @@ const t = {
     unitWeeks: 'सप्ताह',
     uWeek: 'सप्ताह',
     autoDone: 'रिपोर्ट एक बार बन गई। दोबारा बनाने के लिए ऑटो चालू करें या समय चुनें।',
+    // ---- data loading ----
+    reportsLoading: 'रिपोर्ट लोड हो रही हैं...',
+    reportsOffline: 'ऑफ़लाइन — आख़िरी सहेजी रिपोर्ट दिख रही हैं',
+    reportsLoadError: 'रिपोर्ट लोड नहीं हो सकीं। फिर कोशिश करें।',
+    retry: 'पुनः प्रयास',
   },
 } as const;
 
@@ -491,6 +478,42 @@ type Translations = {
   [K in keyof typeof t['en']]: typeof t['en'][K] extends (arg: infer A) => string
     ? (arg: A) => string
     : string;
+};
+
+type GeneratedReportEntry = {
+  id: string;
+  report: WeeklyReportData;
+};
+
+const getGeneratedReportsStorageKey = (): string => {
+  try {
+    const businessId = localStorage.getItem('zakhira_business_id') || 'default';
+    return `zakhira_generated_weekly_reports_v1:${businessId}`;
+  } catch {
+    return 'zakhira_generated_weekly_reports_v1:default';
+  }
+};
+
+const loadGeneratedReports = (): GeneratedReportEntry[] => {
+  try {
+    const raw = localStorage.getItem(getGeneratedReportsStorageKey());
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is GeneratedReportEntry =>
+        Boolean(
+          entry &&
+            typeof entry === 'object' &&
+            typeof entry.id === 'string' &&
+            entry.report &&
+            typeof entry.report === 'object' &&
+            typeof entry.report.weekKey === 'string' &&
+            typeof entry.report.label === 'string'
+        )
+    );
+  } catch {
+    return [];
+  }
 };
 
 const getStoredLanguage = (): Language => {
@@ -504,12 +527,6 @@ const getStoredLanguage = (): Language => {
 };
 
 const isRTLLang = (lang: Language): boolean => lang === 'ar' || lang === 'ur';
-
-// ============================================================
-// STORAGE KEYS
-// ============================================================
-const TRANSACTIONS_STORAGE_KEY = 'zakhira_transactions';
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
 
 // ============================================================
 // 🖨️ PRINT HELPER
@@ -560,20 +577,6 @@ const printHtmlDocument = (html: string): void => {
 };
 
 // ============================================================
-// STORAGE HELPERS
-// ============================================================
-const loadTransactions = (): Transaction[] => {
-  try {
-    const raw = localStorage.getItem(TRANSACTIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-// ============================================================
 // HELPERS
 // ============================================================
 const formatPrice = (n: number, lang: Language = 'en'): string => {
@@ -594,209 +597,16 @@ const formatClock = (msOrIso: number | string): string => {
   });
 };
 
-const isReturnEntry = (t: Transaction): boolean =>
-  t.type === 'Return' || (t.type === 'Out' && t.status === 'Returned');
-
-const receivedAmount = (t: Transaction): number => {
-  if (typeof t.amountPaid === 'number') return Math.max(0, t.amountPaid);
-  if (t.status === 'Paid') return t.amount;
-  if (t.status === 'Partially Paid') {
-    if (typeof t.balanceDue === 'number')
-      return Math.max(0, t.amount - t.balanceDue);
-    return 0;
-  }
-  return 0;
-};
-
-const dueAmount = (t: Transaction): number => {
-  if (typeof t.balanceDue === 'number') return Math.max(0, t.balanceDue);
-  if (t.status === 'Paid') return 0;
-  if (t.status === 'Partially Paid') {
-    if (typeof t.amountPaid === 'number')
-      return Math.max(0, t.amount - t.amountPaid);
-    return t.amount;
-  }
-  return t.amount;
-};
+/** product / method names now come from the database → escape before putting them in HTML */
+const esc = (s: string | number | undefined | null): string =>
+  String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
 // ============================================================
-// 📅 WEEK HELPERS (Saturday → Friday)
-// ============================================================
-const offsetFromSaturday = (day: number): number => (day + 1) % 7;
-
-const getWeekKey = (saturdayStart: Date): string => {
-  const y = saturdayStart.getFullYear();
-  const m = String(saturdayStart.getMonth() + 1).padStart(2, '0');
-  const d = String(saturdayStart.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
-const formatWeekLabel = (start: Date, end: Date): string => {
-  const fmt = (d: Date) =>
-    d.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  return `${fmt(start)} – ${fmt(end)}`;
-};
-
-const getWeekRange = (date: Date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const offset = offsetFromSaturday(d.getDay());
-
-  const start = new Date(d);
-  start.setDate(d.getDate() - offset);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    weekKey: getWeekKey(start),
-    start,
-    end,
-    label: formatWeekLabel(start, end),
-  };
-};
-
-const getLastClosedWeek = (now: Date = new Date()) => {
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const diffToFriday = (today.getDay() + 2) % 7;
-  const lastFriday = new Date(today);
-  lastFriday.setDate(today.getDate() - diffToFriday);
-  return getWeekRange(lastFriday);
-};
-
-const enumerateWeeks = (from: Date, to: Date) => {
-  const out: ReturnType<typeof getWeekRange>[] = [];
-  const cursor = new Date(getWeekRange(from).start);
-  const limit = getWeekRange(to).start;
-  while (cursor.getTime() <= limit.getTime()) {
-    out.push(getWeekRange(cursor));
-    cursor.setDate(cursor.getDate() + 7);
-  }
-  return out;
-};
-
-// ============================================================
-// 📊 WEEKLY REPORT BUILDER
-// ============================================================
-const buildWeeklyReport = (
-  allTxns: Transaction[],
-  start: Date,
-  end: Date,
-  weekKey: string,
-  label: string
-): WeeklyReportData => {
-  const startMs = start.getTime();
-  const endMs = end.getTime();
-
-  const inWeek = allTxns.filter((t) => {
-    const ms = new Date(t.date).getTime();
-    return ms >= startMs && ms <= endMs;
-  });
-
-  const ins = inWeek.filter((t) => t.type === 'In');
-  const outs = inWeek.filter(
-    (t) => t.type === 'Out' && t.status !== 'Returned'
-  );
-  const returns = inWeek.filter(isReturnEntry);
-
-  const totalReturns = returns.reduce((s, t) => s + t.amount, 0);
-  const totalSales = ins.reduce((s, t) => s + t.amount, 0) - totalReturns;
-
-  const totalPaymentsReceived = ins.reduce((s, t) => s + receivedAmount(t), 0);
-  const outstandingBalances = ins.reduce((s, t) => s + dueAmount(t), 0);
-
-  const partialIns = ins.filter((t) => t.status === 'Partially Paid');
-  const partialPaymentsReceived = partialIns.reduce(
-    (s, t) => s + receivedAmount(t),
-    0
-  );
-  const amountStillDue = ins.reduce((s, t) => s + dueAmount(t), 0);
-
-  const totalPurchases = outs.reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = totalPurchases;
-
-  const paymentsByMethod: Record<string, number> = {};
-  ins.forEach((t) => {
-    const m = t.mode || 'Other';
-    paymentsByMethod[m] = (paymentsByMethod[m] || 0) + receivedAmount(t);
-  });
-
-  const topSellingProducts: Array<{
-    name: string;
-    qty: number;
-    revenue: number;
-  }> = [];
-  try {
-    const docsRaw = localStorage.getItem(DOCUMENTS_KEY);
-    if (docsRaw) {
-      const docs = JSON.parse(docsRaw);
-      const productMap = new Map<string, { qty: number; revenue: number }>();
-      if (Array.isArray(docs)) {
-        for (const doc of docs) {
-          const docDateMs = new Date(
-            doc.date || doc.createdAt || doc.issueDate || 0
-          ).getTime();
-          if (docDateMs < startMs || docDateMs > endMs) continue;
-          const items =
-            doc.items || doc.products || doc.lines || doc.lineItems || [];
-          if (!Array.isArray(items)) continue;
-          for (const it of items) {
-            const name =
-              it.name ||
-              it.productName ||
-              it.material ||
-              it.description ||
-              'Unknown';
-            const qty = Number(it.qty || it.quantity || 0);
-            const revenue = Number(it.total || it.lineTotal || it.amount || 0);
-            const cur = productMap.get(name) || { qty: 0, revenue: 0 };
-            cur.qty += qty;
-            cur.revenue += revenue;
-            productMap.set(name, cur);
-          }
-        }
-      }
-      topSellingProducts.push(
-        ...Array.from(productMap.entries())
-          .map(([name, v]) => ({ name, qty: v.qty, revenue: v.revenue }))
-          .sort((a, b) => b.qty - a.qty)
-          .slice(0, 10)
-      );
-    }
-  } catch {
-    /* ignore */
-  }
-
-  return {
-    weekKey,
-    label,
-    startISO: start.toISOString(),
-    endISO: end.toISOString(),
-    totalSales,
-    totalPaymentsReceived,
-    outstandingBalances,
-    totalPurchases,
-    totalExpenses,
-    netProfitLoss: totalSales - totalPurchases - totalExpenses,
-    paymentsByMethod,
-    partialPaymentsReceived,
-    amountStillDue,
-    topSellingProducts,
-    generatedAt: new Date().toISOString(),
-    isSample: false,
-    isLive: false,
-  };
-};
-
-// ============================================================
-// 🎭 ALWAYS-AVAILABLE SAMPLE REPORTS (4 hardcoded)
+// 🎭 SAMPLE REPORTS (4 hardcoded demo reports — see SHOW_SAMPLES)
 // ============================================================
 const generateSampleReports = (): WeeklyReportData[] => {
   const lastClosed = getLastClosedWeek();
@@ -927,6 +737,15 @@ const generateSampleReports = (): WeeklyReportData[] => {
   });
 };
 
+/** real reports (from the database) + the demo ones (optional) */
+const withSamples = (real: WeeklyReportData[]): WeeklyReportData[] => {
+  const byStartDesc = (a: WeeklyReportData, b: WeeklyReportData): number =>
+    new Date(b.startISO).getTime() - new Date(a.startISO).getTime();
+  const sortedReal = [...real].sort(byStartDesc);
+  if (!SHOW_SAMPLES) return sortedReal;
+  return [...sortedReal, ...generateSampleReports().sort(byStartDesc)];
+};
+
 // ============================================================
 // 📄 WEEKLY REPORT PDF DOWNLOAD
 // ============================================================
@@ -940,7 +759,7 @@ const downloadWeeklyReportPdf = (
   const methodRows =
     Object.keys(r.paymentsByMethod).length > 0
       ? Object.entries(r.paymentsByMethod)
-          .map(([m, v]) => `<tr><td>${m}</td><td class="r">${fmt(v)}</td></tr>`)
+          .map(([m, v]) => `<tr><td>${esc(m)}</td><td class="r">${fmt(v)}</td></tr>`)
           .join('')
       : `<tr><td colspan="2" style="text-align:center;color:${THEME.mutedOlive}">${tr.wNoPayments}</td></tr>`;
 
@@ -949,7 +768,7 @@ const downloadWeeklyReportPdf = (
       ? r.topSellingProducts
           .map(
             (p, i) =>
-              `<tr><td>${i + 1}</td><td>${p.name}</td><td class="r">${p.qty}</td><td class="r">${fmt(p.revenue)}</td></tr>`
+              `<tr><td>${i + 1}</td><td>${esc(p.name)}</td><td class="r">${p.qty}</td><td class="r">${fmt(p.revenue)}</td></tr>`
           )
           .join('')
       : `<tr><td colspan="4" style="text-align:center;color:${THEME.mutedOlive}">${tr.wNoProducts}</td></tr>`;
@@ -1296,58 +1115,6 @@ const savePdf = (r: WeeklyReportData): string => {
 };
 
 // ============================================================
-// 🔧 BUILD ALL REPORTS = real (+ live current week) + sample
-// ============================================================
-const buildAllReports = (txns: Transaction[]): WeeklyReportData[] => {
-  const sampleReports = generateSampleReports();
-  const realReports: WeeklyReportData[] = [];
-
-  if (txns.length > 0) {
-    const dates = txns
-      .map((t) => new Date(t.date).getTime())
-      .filter((n) => !isNaN(n));
-
-    if (dates.length > 0) {
-      const earliest = new Date(Math.min(...dates));
-      const lastClosed = getLastClosedWeek();
-      const weeks = enumerateWeeks(earliest, lastClosed.end);
-
-      for (const w of weeks) {
-        realReports.push(
-          buildWeeklyReport(txns, w.start, w.end, w.weekKey, w.label)
-        );
-      }
-
-      // Current (running) week — so frequent auto-generation shows real changes
-      const cur = getWeekRange(new Date());
-      const existing = realReports.find((r) => r.weekKey === cur.weekKey);
-      if (existing) {
-        existing.isLive = true;
-      } else {
-        const live = buildWeeklyReport(
-          txns,
-          cur.start,
-          cur.end,
-          `live-${cur.weekKey}`,
-          cur.label
-        );
-        live.isLive = true;
-        realReports.push(live);
-      }
-    }
-  }
-
-  const sortedReal = realReports.sort(
-    (a, b) => new Date(b.startISO).getTime() - new Date(a.startISO).getTime()
-  );
-  const sortedSample = sampleReports.sort(
-    (a, b) => new Date(b.startISO).getTime() - new Date(a.startISO).getTime()
-  );
-
-  return [...sortedReal, ...sortedSample];
-};
-
-// ============================================================
 // STYLES
 // ============================================================
 const cardStyle: React.CSSProperties = {
@@ -1411,6 +1178,10 @@ const Icons = {
     'w-3.5 h-3.5'
   ),
   check: ic('M20 6 9 17l-5-5', 'w-2.5 h-2.5'),
+  alert: ic(
+    'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+    'w-3.5 h-3.5'
+  ),
 };
 
 // ============================================================
@@ -1760,9 +1531,18 @@ export default function WeeklyReportsPage(): React.JSX.Element {
   const tr = t[language] as Translations;
   const rtl = isRTLLang(language);
 
+  // First paint: last saved reports (instant), the database refresh follows right after.
   const [reports, setReports] = useState<WeeklyReportData[]>(() =>
-    buildAllReports(loadTransactions())
+    withSamples(reportsService.getCached() ?? [])
   );
+  const [generatedReports, setGeneratedReports] =
+    useState<GeneratedReportEntry[]>(loadGeneratedReports);
+  const generatedReportsRef = useRef(generatedReports);
+  const [loading, setLoading] = useState<boolean>(
+    () => reportsService.getCached() === null
+  );
+  const [offlineNote, setOfflineNote] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [reportFrom, setReportFrom] = useState('');
   const [reportTo, setReportTo] = useState('');
 
@@ -1780,6 +1560,7 @@ export default function WeeklyReportsPage(): React.JSX.Element {
   const [resetKey, setResetKey] = useState(0);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [archiveSaveError, setArchiveSaveError] = useState(false);
   const [autoDone, setAutoDone] = useState(false);
 
   const saveReportFile = useCallback((r: WeeklyReportData): void => {
@@ -1792,24 +1573,62 @@ export default function WeeklyReportsPage(): React.JSX.Element {
     }
   }, []);
 
-  // Rebuild the reports and (optionally) save the newest report as a PDF in Downloads
-  const generateAndSave = useCallback(
-    (save: boolean): void => {
-      const fresh = buildAllReports(loadTransactions());
-      setReports(fresh);
+  const archiveGeneratedReport = useCallback((report: WeeklyReportData): void => {
+    const generatedAt = new Date().toISOString();
+    const entry: GeneratedReportEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      report: { ...report, generatedAt },
+    };
+    const next = [entry, ...generatedReportsRef.current].slice(0, 50);
+    generatedReportsRef.current = next;
+    setGeneratedReports(next);
+
+    try {
+      localStorage.setItem(getGeneratedReportsStorageKey(), JSON.stringify(next));
+      setArchiveSaveError(false);
+    } catch (error) {
+      console.error('[WeeklyReports] could not save generated report history', error);
+      setArchiveSaveError(true);
+    }
+  }, []);
+
+  // Reads the reports (database when online, last saved copy otherwise)
+  const fetchReports = useCallback(async (): Promise<WeeklyReportData[] | null> => {
+    try {
+      const { reports: real, fromCache } = await reportsService.load();
+      const merged = withSamples(real);
+      setReports(merged);
+      setOfflineNote(fromCache);
+      setLoadError(false);
       setLastRunAt(Date.now());
-      if (save) {
-        const pick = fresh.find((r) => !r.isSample) ?? fresh[0];
-        if (pick) saveReportFile(pick);
+      return merged;
+    } catch (e) {
+      console.error('[WeeklyReports] load failed', e);
+      setLoadError(true);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Reload the reports and (optionally) save the newest real report as a PDF in Downloads
+  const generateAndSave = useCallback(
+    async (save: boolean): Promise<void> => {
+      const fresh = await fetchReports();
+      if (fresh) {
+        const realReport = fresh.find((r) => !r.isSample);
+        const pick = realReport ?? fresh[0];
+        if (realReport) archiveGeneratedReport(realReport);
+        if (save && pick) saveReportFile(pick);
       }
     },
-    [saveReportFile]
+    [fetchReports, archiveGeneratedReport, saveReportFile]
   );
 
-  // Refresh on screen only (no file) — used for storage / focus events
-  const regenerate = useCallback((): void => {
-    generateAndSave(false);
-  }, [generateAndSave]);
+  // First load
+  useEffect(() => {
+    void fetchReports();
+  }, [fetchReports]);
 
   // Auto-generate timer (checks every 500ms so very long intervals never overflow setTimeout)
   useEffect(() => {
@@ -1824,7 +1643,7 @@ export default function WeeklyReportsPage(): React.JSX.Element {
       if (Date.now() >= next) {
         // ONE-SHOT: generate once, then switch Auto OFF
         clearInterval(id);
-        generateAndSave(schedule.autoSave);
+        void generateAndSave(schedule.autoSave);
         const done: Schedule = { ...schedule, enabled: false };
         setSchedule(done);
         saveSchedule(done);
@@ -1835,27 +1654,26 @@ export default function WeeklyReportsPage(): React.JSX.Element {
     return () => clearInterval(id);
   }, [schedule, resetKey, generateAndSave]);
 
-  // Refresh when transactions change
+  // Refresh when something that feeds the reports changes (debounced: many events → one reload)
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const onStorage = (e: StorageEvent): void => {
-      if (
-        e.key === TRANSACTIONS_STORAGE_KEY ||
-        e.key === DOCUMENTS_KEY ||
-        e.key === 'zakhira_user'
-      ) {
-        regenerate();
-      }
+    const scheduleReload = (): void => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => void fetchReports(), 800);
     };
-    const onCustom = (): void => regenerate();
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onCustom);
-    window.addEventListener('zakhira:sales-updated', onCustom as EventListener);
+    const events = [
+      'focus',
+      'online',
+      'zakhira:sales-updated',
+      'zakhira:orders-synced',
+      'zakhira:inventory-updated',
+    ];
+    events.forEach((e) => window.addEventListener(e, scheduleReload));
     return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onCustom);
-      window.removeEventListener('zakhira:sales-updated', onCustom as EventListener);
+      events.forEach((e) => window.removeEventListener(e, scheduleReload));
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
     };
-  }, [regenerate]);
+  }, [fetchReports]);
 
   const updateSchedule = (next: Schedule): void => {
     setSchedule(next);
@@ -1888,7 +1706,7 @@ export default function WeeklyReportsPage(): React.JSX.Element {
   };
 
   const handleGenerateNow = (): void => {
-    generateAndSave(true); // always saves a PDF when the user clicks
+    void generateAndSave(true); // always saves a PDF when the user clicks
     setResetKey((k) => k + 1); // restart the countdown from now
   };
 
@@ -1982,7 +1800,7 @@ export default function WeeklyReportsPage(): React.JSX.Element {
               {tr.pageTitle}
             </h1>
             <p className="text-[11px]" style={{ color: 'rgba(247,243,234,0.7)' }}>
-              {tr.pageSubtitle}
+              {loading ? tr.reportsLoading : tr.pageSubtitle}
             </p>
           </div>
         </div>
@@ -2011,6 +1829,58 @@ export default function WeeklyReportsPage(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* DATA STATUS BANNERS */}
+      {offlineNote && (
+        <div
+          className="mb-3 px-3 py-2 rounded-full text-[11px] font-bold flex items-center gap-2"
+          style={{
+            backgroundColor: 'rgba(196,154,90,0.15)',
+            border: '2px solid rgba(196,154,90,0.4)',
+            color: THEME.charcoal,
+          }}
+        >
+          {Icons.alert}
+          <span>{tr.reportsOffline}</span>
+        </div>
+      )}
+      {loadError && (
+        <div
+          className="mb-3 px-3 py-2 rounded-full text-[11px] font-bold flex items-center justify-between gap-2"
+          style={{
+            backgroundColor: 'rgba(196,154,90,0.15)',
+            border: '2px solid rgba(196,154,90,0.4)',
+            color: THEME.charcoal,
+          }}
+        >
+          <span className="flex items-center gap-2">
+            {Icons.alert}
+            <span>{tr.reportsLoadError}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => void fetchReports()}
+            className="font-bold hover:underline cursor-pointer flex-shrink-0"
+            style={{ color: THEME.warmBrass }}
+          >
+            {tr.retry}
+          </button>
+        </div>
+      )}
+      {archiveSaveError && (
+        <div
+          role="alert"
+          className="mb-3 px-3 py-2 rounded-full text-[11px] font-bold flex items-center gap-2"
+          style={{
+            backgroundColor: 'rgba(196,154,90,0.15)',
+            border: '2px solid rgba(196,154,90,0.4)',
+            color: THEME.charcoal,
+          }}
+        >
+          {Icons.alert}
+          <span>{tr.generatedReportsSaveError}</span>
+        </div>
+      )}
 
       {/* AUTO-GENERATE SCHEDULE */}
       <div className="rounded-3xl p-4 mb-4" style={cardStyle}>
@@ -2233,10 +2103,10 @@ export default function WeeklyReportsPage(): React.JSX.Element {
         />
       </div>
 
-      {reports.length === 0 ? (
+      {reports.length === 0 && generatedReports.length === 0 ? (
         <div className="rounded-3xl p-8 text-center" style={cardStyle}>
           <h3 className="text-[13px] font-bold mb-1" style={{ color: THEME.deepForest }}>
-            {tr.noReportsAtAll}
+            {loading ? tr.reportsLoading : tr.noReportsAtAll}
           </h3>
           <p className="text-[11px]" style={{ color: THEME.mutedOlive }}>
             {tr.noReportsYet}
@@ -2339,6 +2209,46 @@ export default function WeeklyReportsPage(): React.JSX.Element {
               </p>
             </div>
           )}
+
+          {/* GENERATED REPORT HISTORY */}
+          <section className="mt-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2
+                className="text-[13px] font-bold"
+                style={{ color: THEME.deepForest }}
+              >
+                {tr.generatedReportsTitle}
+              </h2>
+              <span
+                className="text-[10px] font-bold px-3 py-1 rounded-full"
+                style={{
+                  backgroundColor: 'rgba(102,116,90,0.1)',
+                  color: THEME.mutedOlive,
+                }}
+              >
+                {tr.reportsCount(generatedReports.length)}
+              </span>
+            </div>
+            {generatedReports.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {generatedReports.map((entry) => (
+                  <ReportCard
+                    key={entry.id}
+                    report={entry.report}
+                    tr={tr}
+                    lang={language}
+                    onDownload={saveReportFile}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-3xl p-5 text-center" style={cardStyle}>
+                <p className="text-[11px]" style={{ color: THEME.mutedOlive }}>
+                  {tr.noGeneratedReports}
+                </p>
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>

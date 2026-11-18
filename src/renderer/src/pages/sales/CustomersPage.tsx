@@ -4,7 +4,15 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { THEME } from '@renderer/theme/theme';
-import { customerService } from '@renderer/services/customerService';
+import {
+  customerService,
+  type CustomerInput as CustomerPayload,
+} from '@renderer/services/customerService';
+import {
+  RECORDS_SYNCED_EVENT,
+  recordsService,
+  type RecordsDocument,
+} from '@renderer/services/recordsService';
 
 // ============================================================
 // 🌍 LANGUAGE
@@ -17,12 +25,13 @@ const t = {
     pageSubtitle: 'Maintain the customer directory',
     totalCustomers: 'Total Customers',
     customerRevenue: 'Customer Revenue',
+    allCustomers: 'All customers',
     selectCustomerPrompt: 'Select a customer to view revenue',
-    customerRevenueHint: 'VAT-exclusive · net of returns',
+    customerRevenueHint: 'VAT-exclusive · approved invoices',
     addCustomer: 'Add Customer',
     filters: 'Filters',
     search: 'Search',
-    searchPh: 'Name, company, phone, email...',
+    searchPh: 'Name, company, phone, email, VAT...',
     city: 'City',
     allCities: 'All Cities',
     sortBy: 'Sort By',
@@ -36,6 +45,7 @@ const t = {
     colPhone: 'Phone',
     colEmail: 'Email',
     colCity: 'City',
+    colRevenue: 'Revenue',
     colCreated: 'Created',
     colActions: 'Actions',
     customers: 'Customers',
@@ -51,6 +61,9 @@ const t = {
     customerName: 'Customer Name',
     company: 'Company',
     phoneNumber: 'Phone Number',
+    vatNumber: 'VAT Number',
+    vatNumberPh: 'e.g. 300123456700003',
+    vatNumberHint: 'Optional tax registration number.',
     email: 'Email',
     address: 'Address',
     customerNamePh: 'Ahmed Al-Farsi',
@@ -60,7 +73,7 @@ const t = {
     phoneIntlLabel: 'With country code',
     phoneLocalLabel: 'Without country code (no validation)',
     phoneEitherHint: 'Fill at least one of the two.',
-    errPhoneEither: 'Enter at least one phone number',
+    errPhoneEither: 'Enter a phone number',
     emailPh: 'ahmed@example.com',
     cityPh: 'Riyadh',
     addressPh: 'Street, Building, Area',
@@ -71,7 +84,7 @@ const t = {
     cancel: 'Cancel',
     errNameRequired: 'Customer name is required',
     errPhoneRequired: 'Phone number is required',
-    errPhoneInvalid: 'Enter phone with country code, e.g. +966 50 123 4567',
+    errPhoneInvalid: 'Enter a valid phone, e.g. +966 50 123 4567',
     errEmailInvalid: 'Enter a valid email address',
     errDuplicatePhone: (name: string) =>
       `This phone number already belongs to ${name}. Each phone number must be unique.`,
@@ -93,6 +106,7 @@ const t = {
     errLoadCustomers: 'Could not load customers',
     errSaveCustomer: 'Could not save customer',
     errDeleteCustomer: 'Could not delete customer',
+    errSyncCustomer: 'Could not sync to the server',
     loading: 'Loading…',
     ok: 'OK',
     showing: 'Showing',
@@ -106,12 +120,13 @@ const t = {
     pageSubtitle: 'حافظ على دليل العملاء',
     totalCustomers: 'إجمالي العملاء',
     customerRevenue: 'إيرادات العميل',
+    allCustomers: 'جميع العملاء',
     selectCustomerPrompt: 'اختر عميلاً لعرض الإيرادات',
-    customerRevenueHint: 'بدون ضريبة · بعد المرتجعات',
+    customerRevenueHint: 'بدون ضريبة · الفواتير المعتمدة',
     addCustomer: 'إضافة عميل',
     filters: 'الفلاتر',
     search: 'بحث',
-    searchPh: 'الاسم، الشركة، الهاتف، البريد...',
+    searchPh: 'الاسم، الشركة، الهاتف، البريد، الرقم الضريبي...',
     city: 'المدينة',
     allCities: 'جميع المدن',
     sortBy: 'ترتيب حسب',
@@ -125,6 +140,7 @@ const t = {
     colPhone: 'الهاتف',
     colEmail: 'البريد الإلكتروني',
     colCity: 'المدينة',
+    colRevenue: 'الإيراد',
     colCreated: 'أُنشئ',
     colActions: 'الإجراءات',
     customers: 'العملاء',
@@ -140,6 +156,9 @@ const t = {
     customerName: 'اسم العميل',
     company: 'الشركة',
     phoneNumber: 'رقم الهاتف',
+    vatNumber: 'الرقم الضريبي',
+    vatNumberPh: 'مثال: 300123456700003',
+    vatNumberHint: 'رقم التسجيل الضريبي (اختياري).',
     email: 'البريد الإلكتروني',
     address: 'العنوان',
     customerNamePh: 'أحمد الفارسي',
@@ -149,7 +168,7 @@ const t = {
     phoneIntlLabel: 'مع رمز الدولة',
     phoneLocalLabel: 'بدون رمز الدولة (بدون تحقق)',
     phoneEitherHint: 'املأ حقلاً واحداً على الأقل. يجب أن يكون كل رقم فريداً.',
-    errPhoneEither: 'أدخل رقم هاتف واحداً على الأقل',
+    errPhoneEither: 'أدخل رقم الهاتف',
     emailPh: 'ahmed@example.com',
     cityPh: 'الرياض',
     addressPh: 'الشارع، المبنى، المنطقة',
@@ -160,7 +179,7 @@ const t = {
     cancel: 'إلغاء',
     errNameRequired: 'اسم العميل مطلوب',
     errPhoneRequired: 'رقم الهاتف مطلوب',
-    errPhoneInvalid: 'أدخل الهاتف مع رمز الدولة، مثل +966 50 123 4567',
+    errPhoneInvalid: 'أدخل رقماً صالحاً، مثل +966 50 123 4567',
     errEmailInvalid: 'أدخل بريداً إلكترونياً صالحاً',
     errDuplicatePhone: (name: string) =>
       `رقم الهاتف هذا مسجّل بالفعل للعميل ${name}. يجب أن يكون كل رقم فريداً.`,
@@ -182,6 +201,7 @@ const t = {
     errLoadCustomers: 'تعذر تحميل العملاء',
     errSaveCustomer: 'تعذر حفظ العميل',
     errDeleteCustomer: 'تعذر حذف العميل',
+    errSyncCustomer: 'تعذرت المزامنة مع الخادم',
     loading: 'جارٍ التحميل…',
     ok: 'موافق',
     showing: 'عرض',
@@ -194,12 +214,13 @@ const t = {
     pageSubtitle: 'کسٹمر ڈائریکٹری برقرار رکھیں',
     totalCustomers: 'کل کسٹمرز',
     customerRevenue: 'کسٹمر آمدنی',
+    allCustomers: 'تمام کسٹمرز',
     selectCustomerPrompt: 'آمدنی دیکھنے کے لیے کسٹمر منتخب کریں',
-    customerRevenueHint: 'ویٹ کے بغیر · ریٹرنز کے بعد',
+    customerRevenueHint: 'ویٹ کے بغیر · منظور شدہ انوائسز',
     addCustomer: 'کسٹمر شامل کریں',
     filters: 'فلٹرز',
     search: 'تلاش',
-    searchPh: 'نام، کمپنی، فون، ای میل...',
+    searchPh: 'نام، کمپنی، فون، ای میل، VAT...',
     city: 'شہر',
     allCities: 'تمام شہر',
     sortBy: 'ترتیب دیں',
@@ -213,6 +234,7 @@ const t = {
     colPhone: 'فون',
     colEmail: 'ای میل',
     colCity: 'شہر',
+    colRevenue: 'آمدنی',
     colCreated: 'بنایا گیا',
     colActions: 'اقدامات',
     customers: 'کسٹمرز',
@@ -228,6 +250,9 @@ const t = {
     customerName: 'کسٹمر کا نام',
     company: 'کمپنی',
     phoneNumber: 'فون نمبر',
+    vatNumber: 'VAT نمبر',
+    vatNumberPh: 'مثلاً 300123456700003',
+    vatNumberHint: 'ٹیکس رجسٹریشن نمبر (اختیاری)۔',
     email: 'ای میل',
     address: 'پتہ',
     customerNamePh: 'احمد الفارسی',
@@ -237,7 +262,7 @@ const t = {
     phoneIntlLabel: 'کنٹری کوڈ کے ساتھ',
     phoneLocalLabel: 'کنٹری کوڈ کے بغیر (بغیر ویلیڈیشن)',
     phoneEitherHint: 'کم از کم ایک خانہ بھرنا لازمی ہے۔ ہر نمبر منفرد ہونا چاہیے۔',
-    errPhoneEither: 'کم از کم ایک فون نمبر درج کریں',
+    errPhoneEither: 'فون نمبر درج کریں',
     emailPh: 'ahmed@example.com',
     cityPh: 'ریاض',
     addressPh: 'گلی، عمارت، علاقہ',
@@ -248,7 +273,7 @@ const t = {
     cancel: 'منسوخ',
     errNameRequired: 'کسٹمر کا نام لازمی ہے',
     errPhoneRequired: 'فون نمبر لازمی ہے',
-    errPhoneInvalid: 'کنٹری کوڈ کے ساتھ فون درج کریں، مثلاً +966 50 123 4567',
+    errPhoneInvalid: 'درست فون نمبر درج کریں، مثلاً +966 50 123 4567',
     errEmailInvalid: 'درست ای میل درج کریں',
     errDuplicatePhone: (name: string) =>
       `یہ فون نمبر پہلے ہی ${name} کے پاس ہے۔ ہر فون نمبر منفرد ہونا چاہیے۔`,
@@ -270,6 +295,7 @@ const t = {
     errLoadCustomers: 'کسٹمرز لوڈ نہیں ہو سکے',
     errSaveCustomer: 'کسٹمر محفوظ نہیں ہو سکا',
     errDeleteCustomer: 'کسٹمر حذف نہیں ہو سکا',
+    errSyncCustomer: 'سرور کے ساتھ سنک نہیں ہو سکا',
     loading: 'لوڈ ہو رہا ہے…',
     ok: 'ٹھیک ہے',
     showing: 'دکھا رہے ہیں',
@@ -282,12 +308,13 @@ const t = {
     pageSubtitle: 'ग्राहक निर्देशिका बनाए रखें',
     totalCustomers: 'कुल ग्राहक',
     customerRevenue: 'ग्राहक राजस्व',
+    allCustomers: 'सभी ग्राहक',
     selectCustomerPrompt: 'राजस्व देखने के लिए ग्राहक चुनें',
-    customerRevenueHint: 'वैट-रहित · रिटर्न के बाद',
+    customerRevenueHint: 'वैट-रहित · स्वीकृत इनवॉइस',
     addCustomer: 'ग्राहक जोड़ें',
     filters: 'फ़िल्टर',
     search: 'खोजें',
-    searchPh: 'नाम, कंपनी, फ़ोन, ईमेल...',
+    searchPh: 'नाम, कंपनी, फ़ोन, ईमेल, VAT...',
     city: 'शहर',
     allCities: 'सभी शहर',
     sortBy: 'क्रमबद्ध करें',
@@ -301,6 +328,7 @@ const t = {
     colPhone: 'फ़ोन',
     colEmail: 'ईमेल',
     colCity: 'शहर',
+    colRevenue: 'राजस्व',
     colCreated: 'बनाया गया',
     colActions: 'क्रियाएँ',
     customers: 'ग्राहक',
@@ -316,6 +344,9 @@ const t = {
     customerName: 'ग्राहक का नाम',
     company: 'कंपनी',
     phoneNumber: 'फ़ोन नंबर',
+    vatNumber: 'VAT नंबर',
+    vatNumberPh: 'जैसे 300123456700003',
+    vatNumberHint: 'कर पंजीकरण संख्या (वैकल्पिक)।',
     email: 'ईमेल',
     address: 'पता',
     customerNamePh: 'अहमद अल-फ़ारसी',
@@ -325,7 +356,7 @@ const t = {
     phoneIntlLabel: 'देश कोड के साथ',
     phoneLocalLabel: 'बिना देश कोड (बिना वैलिडेशन)',
     phoneEitherHint: 'कम से कम एक भरना आवश्यक है। हर नंबर अनोखा होना चाहिए।',
-    errPhoneEither: 'कम से कम एक फ़ोन नंबर दर्ज करें',
+    errPhoneEither: 'फ़ोन नंबर दर्ज करें',
     emailPh: 'ahmed@example.com',
     cityPh: 'रियाद',
     addressPh: 'सड़क, भवन, क्षेत्र',
@@ -336,7 +367,7 @@ const t = {
     cancel: 'रद्द करें',
     errNameRequired: 'ग्राहक का नाम आवश्यक है',
     errPhoneRequired: 'फ़ोन नंबर आवश्यक है',
-    errPhoneInvalid: 'देश कोड के साथ फ़ोन दर्ज करें, जैसे +966 50 123 4567',
+    errPhoneInvalid: 'मान्य फ़ोन दर्ज करें, जैसे +966 50 123 4567',
     errEmailInvalid: 'मान्य ईमेल दर्ज करें',
     errDuplicatePhone: (name: string) =>
       `यह फ़ोन नंबर पहले से ${name} के पास है। हर फ़ोन नंबर अनोखा होना चाहिए।`,
@@ -358,6 +389,7 @@ const t = {
     errLoadCustomers: 'ग्राहक लोड नहीं हो सके',
     errSaveCustomer: 'ग्राहक सहेजा नहीं जा सका',
     errDeleteCustomer: 'ग्राहक हटाया नहीं जा सका',
+    errSyncCustomer: 'सर्वर के साथ सिंक नहीं हो सका',
     loading: 'लोड हो रहा है…',
     ok: 'ठीक है',
     showing: 'दिखा रहे हैं',
@@ -381,32 +413,34 @@ type Translations = {
 // TYPES
 // ============================================================
 type Customer = {
-  /** Supabase UUID */
+  /** Local UUID (same UUID is used in Supabase) */
   id: string;
   name: string;
   company: string;
   email: string;
-  /** Phone WITH country code (validated). May be empty if phoneAlt is filled. */
+  /** Canonical phone number stored with its country code. */
   phone: string;
-  /** Phone WITHOUT country code (no validation). May be empty if phone is filled. */
+  /** Legacy alternate-phone value retained for existing customer records. */
   phoneAlt?: string;
+  vatNumber: string;
   address: string;
   city: string;
   createdAt: string;
   updatedAt: string;
 };
 
+/** Form state */
 type CustomerInput = {
   name: string;
   company: string;
   email: string;
   phone: string;
-  phoneAlt: string;
+  vatNumber: string;
   address: string;
   city: string;
 };
 
-/** Row exactly as it comes from Supabase (snake_case) */
+/** Row exactly as it comes from SQLite / Supabase (snake_case) */
 type DbCustomer = {
   id: string;
   name: string;
@@ -414,20 +448,22 @@ type DbCustomer = {
   email: string | null;
   phone: string | null;
   phone_alt: string | null;
+  vat_number: string | null;
   address: string | null;
   city: string | null;
   created_at: string;
   updated_at: string | null;
 };
 
-/** DB row -> UI customer. id is the Supabase UUID. */
+/** DB row -> UI customer. */
 const mapCustomer = (r: DbCustomer): Customer => ({
   id: r.id,
   name: r.name ?? '',
   company: r.company ?? '',
   email: r.email ?? '',
-  phone: r.phone ?? '',
+  phone: r.phone || r.phone_alt || '',
   phoneAlt: r.phone_alt ?? '',
+  vatNumber: r.vat_number ?? '',
   address: r.address ?? '',
   city: r.city ?? '',
   createdAt: r.created_at,
@@ -441,7 +477,7 @@ type ErrorInfo = {
   code?: string;
 };
 
-/** Supabase throws plain objects (message/details/hint/code), not Error instances */
+/** Errors may be Error instances or plain objects (message/details/hint/code) */
 const describeError = (err: unknown): Omit<ErrorInfo, 'title'> => {
   if (err && typeof err === 'object') {
     const e = err as {
@@ -469,10 +505,30 @@ type SalesDocument = {
   paymentStatus: 'Unpaid' | 'Partially Paid' | 'Paid';
   grandTotal: number;
   subtotal?: number;
-  taxTotal?: number;
+  taxTotal: number;
+  returnedRevenue: number;
   customerId?: string;
   customerSnapshot?: { name?: string; company?: string };
 };
+
+const mapSalesDocument = (document: RecordsDocument): SalesDocument => ({
+  id: document.id,
+  documentType: document.document_type,
+  status: document.status,
+  paymentStatus: document.payment_status,
+  grandTotal: Number(document.grand_total) || 0,
+  subtotal: Number(document.subtotal) || 0,
+  taxTotal: Number(document.tax_total) || 0,
+  returnedRevenue: (document.returns || []).reduce(
+    (total, returned) => total + (Number(returned.subtotal) || 0),
+    0
+  ),
+  customerId: document.customer_id || undefined,
+  customerSnapshot: {
+    name: document.customer_name,
+    company: document.customer_company || '',
+  },
+});
 
 // ============================================================
 // SVG ICONS
@@ -589,10 +645,9 @@ const Icons = {
 // ============================================================
 // CONSTANTS
 // ============================================================
-// Documents are still stored locally (no documents service yet)
-const DOCUMENTS_KEY = 'zakhira_sales_documents';
 const PAGE_SIZE = 10;
 const INTL_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+const ALL_CUSTOMERS = '__all_customers__';
 
 // ============================================================
 // HELPERS
@@ -605,9 +660,23 @@ const normalizePhone = (raw: string): string => {
   return s;
 };
 
-/** Validates the "with country code" field. Empty is allowed here. */
-const validateIntlPhone = (raw: string, tr: Translations): string | null => {
-  const normalized = normalizePhone(raw);
+/** Stores Saudi local numbers with +966 while preserving explicit country codes. */
+const normalizeCustomerPhone = (raw: string): string => {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return '';
+  const toInternational = (value: string): string =>
+    `+${value.startsWith('9660') ? `966${value.slice(4)}` : value}`;
+  if (trimmed.startsWith('+')) return toInternational(digits);
+  if (digits.startsWith('00')) return toInternational(digits.slice(2));
+  if (digits.startsWith('966')) return toInternational(digits);
+  return `+966${digits.replace(/^0+/, '')}`;
+};
+
+const validateCustomerPhone = (
+  normalized: string,
+  tr: Translations
+): string | null => {
   if (!normalized) return null;
   if (!INTL_PHONE_REGEX.test(normalized)) return tr.errPhoneInvalid;
   return null;
@@ -668,20 +737,6 @@ const getStoredLanguage = (): Language => {
 };
 
 const isRTLLang = (lang: Language): boolean => lang === 'ar' || lang === 'ur';
-
-// ============================================================
-// STORAGE (documents only — customers now live in Supabase)
-// ============================================================
-const loadDocuments = (): SalesDocument[] => {
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
 
 // ============================================================
 // STYLES
@@ -842,7 +897,7 @@ function ConfirmModal({
 }
 
 // ============================================================
-// ERROR MODAL (shows backend errors in a popup)
+// ERROR MODAL (shows errors in a popup)
 // ============================================================
 function ErrorModal({
   info,
@@ -990,103 +1045,76 @@ function Pagination({
 // ============================================================
 // CUSTOMER FORM MODAL
 // ============================================================
+// Validation is synchronous and purely local. On success we hand the payload to
+// the parent, which updates the UI optimistically and persists in the background.
 function CustomerFormModal({
   customer,
   existing,
   onClose,
-  onSaved,
-  onError,
+  onSubmit,
   tr,
 }: {
   customer?: Customer | null;
   existing: Customer[];
   onClose: () => void;
-  onSaved: (c: Customer) => void;
-  onError: (title: string, err: unknown) => void;
+  onSubmit: (payload: CustomerPayload, editing: Customer | null) => void;
   tr: Translations;
 }): React.JSX.Element {
   const [form, setForm] = useState<CustomerInput>({
     name: customer?.name ?? '',
     company: customer?.company ?? '',
     email: customer?.email ?? '',
-    phone: customer?.phone ?? '',
-    phoneAlt: customer?.phoneAlt ?? '',
+    phone: customer?.phone || customer?.phoneAlt || '+966',
+    vatNumber: customer?.vatNumber ?? '',
     address: customer?.address ?? '',
     city: customer?.city ?? '',
   });
 
-  const [errors, setErrors] = useState<
-    Partial<Record<keyof CustomerInput | 'phoneGroup', string>>
-  >({});
-  const [saveError, setSaveError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<keyof CustomerInput, string>>>({});
 
   const set = (k: keyof CustomerInput, v: string): void =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = async (): Promise<void> => {
-    if (saving) return;
-    const e: Partial<Record<keyof CustomerInput | 'phoneGroup', string>> = {};
+  const submit = (): void => {
+    const e: Partial<Record<keyof CustomerInput, string>> = {};
     if (!form.name.trim()) e.name = tr.errNameRequired;
 
-    const intl = normalizePhone(form.phone);
-    const alt = normalizePhone(form.phoneAlt);
-
-    // At least ONE of the two phone fields is required
-    if (!intl && !alt) {
-      e.phoneGroup = tr.errPhoneEither;
-    } else {
-      // Country-code field is validated; the other one is not
-      const intlErr = validateIntlPhone(form.phone, tr);
-      if (intlErr) e.phone = intlErr;
+    const phone = normalizeCustomerPhone(form.phone);
+    if (!phone) e.phone = tr.errPhoneEither;
+    else {
+      const phoneErr = validateCustomerPhone(phone, tr);
+      if (phoneErr) e.phone = phoneErr;
     }
 
     const emailErr = validateEmail(form.email, tr);
     if (emailErr) e.email = emailErr;
 
-    // Quick duplicate check on loaded data (DB errors are handled below too)
     const others = existing.filter((c) => c.id !== customer?.id);
 
     // 🔒 UNIQUE PHONE — any number used by another customer is blocked
-    if (intl && !e.phone) {
+    if (phone && !e.phone) {
       const dup = others.find((c) =>
-        phoneKeysOf(c).some((k) => samePhone(k, intl))
+        phoneKeysOf(c).some((k) => samePhone(k, phone))
       );
       if (dup) e.phone = tr.errDuplicatePhone(dup.name);
     }
-    if (alt) {
-      const dup = others.find((c) =>
-        phoneKeysOf(c).some((k) => samePhone(k, alt))
-      );
-      if (dup) e.phoneAlt = tr.errDuplicatePhone(dup.name);
-    }
 
     setErrors(e);
-    setSaveError('');
     if (Object.keys(e).length > 0) return;
 
-    const payload = {
-      name: form.name.trim(),
-      company: form.company.trim() || null,
-      email: form.email.trim() || null,
-      phone: intl || null,
-      phone_alt: alt || null,
-      address: form.address.trim() || null,
-      city: form.city.trim() || null,
-    };
-
-    setSaving(true);
-    try {
-      const row = customer
-        ? await customerService.updateCustomer(customer.id, payload)
-        : await customerService.createCustomer(payload);
-      onSaved(mapCustomer(row as DbCustomer));
-    } catch (err) {
-      setSaveError(describeError(err).message);
-      onError(tr.errSaveCustomer, err); // console + popup
-    } finally {
-      setSaving(false);
-    }
+    onSubmit(
+      {
+        name: form.name.trim(),
+        company: form.company.trim() || null,
+        email: form.email.trim() || null,
+        phone,
+        phone_alt: null,
+        vat_number: form.vatNumber.trim() || null,
+        address: form.address.trim() || null,
+        city: form.city.trim() || null,
+      },
+      customer ?? null
+    );
   };
 
   const errCls = 'text-[10px] font-semibold mt-1 px-2';
@@ -1132,69 +1160,22 @@ function CustomerFormModal({
           />
         </div>
 
-        {/* PHONE — two inputs, at least one is required */}
-        <div className="sm:col-span-2">
+        <div>
           <label className={labelCls} style={{ color: THEME.deepForest }}>
             {tr.phoneNumber} <span style={{ color: THEME.warmBrass }}>*</span>
           </label>
-          <p
-            className="text-[9px] mb-2 px-2"
-            style={{ color: THEME.mutedOlive }}
-          >
-            {tr.phoneEitherHint}
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label
-                className={labelCls}
-                style={{ color: THEME.mutedOlive }}
-              >
-                {tr.phoneIntlLabel}
-              </label>
-              <input
-                type="tel"
-                dir="ltr"
-                value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
-                placeholder={tr.phonePh}
-                className={`${inputCls} font-mono`}
-                style={inputStyle()}
-              />
-              {errors.phone && (
-                <p className={errCls} style={{ color: THEME.warmBrass }}>
-                  {errors.phone}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label
-                className={labelCls}
-                style={{ color: THEME.mutedOlive }}
-              >
-                {tr.phoneLocalLabel}
-              </label>
-              <input
-                type="tel"
-                dir="ltr"
-                value={form.phoneAlt}
-                onChange={(e) => set('phoneAlt', e.target.value)}
-                placeholder={tr.phonePhLocal}
-                className={`${inputCls} font-mono`}
-                style={inputStyle()}
-              />
-              {errors.phoneAlt && (
-                <p className={errCls} style={{ color: THEME.warmBrass }}>
-                  {errors.phoneAlt}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {errors.phoneGroup && (
+          <input
+            type="tel"
+            dir="ltr"
+            value={form.phone}
+            onChange={(e) => set('phone', e.target.value)}
+            placeholder={tr.phonePh}
+            className={`${inputCls} font-mono`}
+            style={inputStyle()}
+          />
+          {errors.phone && (
             <p className={errCls} style={{ color: THEME.warmBrass }}>
-              {errors.phoneGroup}
+              {errors.phone}
             </p>
           )}
         </div>
@@ -1238,6 +1219,22 @@ function CustomerFormModal({
           />
         </div>
 
+        <div>
+          <label className={labelCls} style={{ color: THEME.deepForest }}>
+            {tr.vatNumber}
+          </label>
+          <input
+            value={form.vatNumber}
+            onChange={(e) => set('vatNumber', e.target.value)}
+            placeholder={tr.vatNumberPh}
+            className={`${inputCls} font-mono`}
+            style={inputStyle()}
+          />
+          <p className="text-[9px] mt-1 px-2" style={{ color: THEME.mutedOlive }}>
+            {tr.vatNumberHint}
+          </p>
+        </div>
+
         <div className="sm:col-span-2">
           <label className={labelCls} style={{ color: THEME.deepForest }}>
             {tr.address}
@@ -1252,28 +1249,13 @@ function CustomerFormModal({
         </div>
       </div>
 
-      {saveError && (
-        <div
-          className="mt-3 px-3 py-2 rounded-xl text-[11px] font-bold flex items-center gap-2"
-          style={{
-            background: 'rgba(196,154,90,0.1)',
-            border: `2px solid rgba(196,154,90,0.4)`,
-            color: THEME.charcoal,
-          }}
-        >
-          {Icons.alert}
-          <span>{saveError}</span>
-        </div>
-      )}
-
       <div
         className="flex gap-2.5 pt-3 mt-3"
         style={{ borderTop: `1px solid ${THEME.mutedOlive}20` }}
       >
         <button
-          onClick={() => void submit()}
-          disabled={saving}
-          className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+          onClick={submit}
+          className="h-9 px-4 rounded-full text-[13px] font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5"
           style={{
             background: THEME.warmBrass,
             color: THEME.warmIvory,
@@ -1376,20 +1358,20 @@ function CustomerDetailsModal({
           />
           <DetailRow
             icon={Icons.phone}
-            label={tr.phoneIntlLabel}
-            value={customer.phone || '—'}
-            mono
-          />
-          <DetailRow
-            icon={Icons.phone}
-            label={tr.phoneLocalLabel}
-            value={customer.phoneAlt || '—'}
+            label={tr.phoneNumber}
+            value={customer.phone || customer.phoneAlt || '—'}
             mono
           />
           <DetailRow
             icon={Icons.mail}
             label={tr.colEmail}
             value={customer.email || '—'}
+            mono
+          />
+          <DetailRow
+            icon={Icons.building}
+            label={tr.vatNumber}
+            value={customer.vatNumber || '—'}
             mono
           />
           <DetailRow
@@ -1457,11 +1439,16 @@ function DetailRow({
 // MAIN COMPONENT
 // ============================================================
 export default function CustomersPage(): React.JSX.Element {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [documents, setDocuments] = useState<SalesDocument[]>(() =>
-    loadDocuments()
+  // Seed from the service's in-memory snapshot → instant render on re-mount
+  const [customers, setCustomers] = useState<Customer[]>(() =>
+    (customerService.getCached() ?? []).map((r) => mapCustomer(r as DbCustomer))
   );
-  const [loading, setLoading] = useState(true);
+  // NOT a spinner: only prevents flashing "No customers found" for the few ms
+  // before the very first local read finishes.
+  const [hydrated, setHydrated] = useState(
+    () => customerService.getCached() !== null
+  );
+  const [documents, setDocuments] = useState<SalesDocument[]>([]);
   const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   const [successMsg, setSuccessMsg] = useState('');
@@ -1473,7 +1460,8 @@ export default function CustomersPage(): React.JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
 
   // Revenue card state
-  const [revenueCustomerId, setRevenueCustomerId] = useState<string>('');
+  const [revenueCustomerId, setRevenueCustomerId] =
+    useState<string>(ALL_CUSTOMERS);
 
   const [search, setSearch] = useState('');
   const [cityFilter, setCityFilter] = useState('All');
@@ -1481,6 +1469,10 @@ export default function CustomersPage(): React.JSX.Element {
     'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'
   >('date-desc');
   const [page, setPage] = useState(1);
+
+  /** Number of in-flight background writes. Refreshes are skipped while > 0 so a
+   *  stale read can never overwrite an optimistic update. */
+  const pendingOps = useRef(0);
 
   const language = getStoredLanguage();
   const tr = t[language] as Translations;
@@ -1492,31 +1484,79 @@ export default function CustomersPage(): React.JSX.Element {
     setErrorInfo({ title, ...describeError(err) });
   };
 
+  /** Re-reads local SQLite (fast, no network). */
   const refresh = async (silent = false): Promise<void> => {
+    if (pendingOps.current > 0) return;
     try {
       const rows = await customerService.getCustomers();
+      if (pendingOps.current > 0) return; // a write started while we were reading
       setCustomers((rows as DbCustomer[]).map(mapCustomer));
     } catch (err) {
-      // Background refreshes only log; the first/explicit load shows the popup
       if (silent) console.error('[Customers] background refresh failed', err);
       else reportError(tr.errLoadCustomers, err);
     } finally {
-      setLoading(false);
+      setHydrated(true);
     }
-    setDocuments(loadDocuments());
+    try {
+      const salesDocuments = await recordsService.getDocuments();
+      setDocuments(salesDocuments.map(mapSalesDocument));
+    } catch (err) {
+      reportError(tr.customerRevenue, err);
+    }
+  };
+
+  /** Runs a service call in the background (UI has already been updated). */
+  const runInBackground = <T,>(
+    op: () => Promise<T>,
+    onOk: (result: T) => void,
+    onFail: (err: unknown) => void
+  ): void => {
+    pendingOps.current += 1;
+    op()
+      .then(onOk)
+      .catch(onFail)
+      .finally(() => {
+        pendingOps.current -= 1;
+      });
   };
 
   // Initial load + reload on focus / sales update
   useEffect(() => {
+    customerService.startSyncWorker(); // background push/pull (idempotent)
+    recordsService.startSyncWorker();
     void refresh(false);
     const bg = (): void => void refresh(true);
+
+    // Background sync changed local data (e.g. edited on another device) → re-read SQLite
+    const onSynced = (): void => void refresh(true);
+    // Real sync failure (RLS, duplicate phone, ...) → show the exact reason once
+    const onSyncError = (e: Event): void => {
+      const d = (e as CustomEvent<{
+        message: string;
+        details?: string;
+        code?: string;
+      }>).detail;
+      setErrorInfo({
+        title: tr.errSyncCustomer,
+        message: d.message,
+        details: d.details,
+        code: d.code,
+      });
+    };
+
     window.addEventListener('storage', bg);
     window.addEventListener('focus', bg);
     window.addEventListener('zakhira:sales-updated', bg);
+    window.addEventListener(RECORDS_SYNCED_EVENT, bg);
+    window.addEventListener('zakhira:customers-synced', onSynced);
+    window.addEventListener('zakhira:customers-sync-error', onSyncError);
     return () => {
       window.removeEventListener('storage', bg);
       window.removeEventListener('focus', bg);
       window.removeEventListener('zakhira:sales-updated', bg);
+      window.removeEventListener(RECORDS_SYNCED_EVENT, bg);
+      window.removeEventListener('zakhira:customers-synced', onSynced);
+      window.removeEventListener('zakhira:customers-sync-error', onSyncError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1552,17 +1592,29 @@ export default function CustomersPage(): React.JSX.Element {
       // Only approved invoices
       if (d.documentType !== 'invoice' || d.status !== 'Approved') continue;
       if (!d.customerId) continue;
-      // VAT-exclusive = subtotal
-      const net = d.subtotal ?? d.grandTotal;
+      // Match Accounting: VAT-exclusive revenue after invoice discounts.
+      const net =
+        (Math.round(d.grandTotal * 100) -
+          Math.round(d.taxTotal * 100) -
+          Math.round(d.returnedRevenue * 100)) /
+        100;
       map.set(d.customerId, (map.get(d.customerId) ?? 0) + net);
     }
     return map;
   }, [documents]);
 
-  // Revenue for the selected customer (or 0 if none selected)
-  const selectedRevenue = revenueCustomerId
-    ? revenueByCustomer.get(revenueCustomerId) ?? 0
-    : 0;
+  const allCustomersRevenue = useMemo(
+    () =>
+      Array.from(revenueByCustomer.values()).reduce(
+        (total, revenue) => total + revenue,
+        0
+      ),
+    [revenueByCustomer]
+  );
+  const selectedRevenue =
+    revenueCustomerId === ALL_CUSTOMERS
+      ? allCustomersRevenue
+      : (revenueByCustomer.get(revenueCustomerId) ?? 0);
 
   const uniqueCities = useMemo(() => {
     const set = new Set<string>();
@@ -1575,6 +1627,10 @@ export default function CustomersPage(): React.JSX.Element {
   const filtered = useMemo(() => {
     let list = [...customers];
 
+    if (revenueCustomerId !== ALL_CUSTOMERS) {
+      list = list.filter((customer) => customer.id === revenueCustomerId);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       const qPhone = normalizePhone(search);
@@ -1586,7 +1642,8 @@ export default function CustomersPage(): React.JSX.Element {
           (c.phoneAlt || '').toLowerCase().includes(q) ||
           (qPhone !== '' &&
             phoneKeysOf(c).some((k) => k.includes(qPhone))) ||
-          (c.email || '').toLowerCase().includes(q)
+          (c.email || '').toLowerCase().includes(q) ||
+          (c.vatNumber || '').toLowerCase().includes(q)
       );
     }
 
@@ -1611,7 +1668,7 @@ export default function CustomersPage(): React.JSX.Element {
     });
 
     return list;
-  }, [customers, search, cityFilter, sortBy]);
+  }, [customers, search, cityFilter, sortBy, revenueCustomerId]);
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -1619,19 +1676,92 @@ export default function CustomersPage(): React.JSX.Element {
     setSearch('');
     setCityFilter('All');
     setSortBy('date-desc');
+    setRevenueCustomerId(ALL_CUSTOMERS);
     setPage(1);
   };
 
   const hasActiveFilters =
-    search.trim() !== '' || cityFilter !== 'All' || sortBy !== 'date-desc';
+    search.trim() !== '' ||
+    cityFilter !== 'All' ||
+    sortBy !== 'date-desc' ||
+    revenueCustomerId !== ALL_CUSTOMERS;
 
-  const handleSaved = (c: Customer): void => {
-    void refresh(true);
+  // ==========================================================
+  // OPTIMISTIC MUTATIONS
+  // UI first → service (SQLite + sync queue) in background → rollback on failure
+  // ==========================================================
+  const handleSubmitCustomer = (
+    payload: CustomerPayload,
+    editing: Customer | null
+  ): void => {
+    const now = new Date().toISOString();
     setShowForm(false);
-    const wasEdit = editingCustomer !== null;
-
     setEditingCustomer(null);
-    showSuccess(wasEdit ? tr.toastUpdated(c.name) : tr.toastCreated(c.name));
+
+    if (editing) {
+      const previous = editing;
+      const optimistic: Customer = {
+        ...editing,
+        name: payload.name,
+        company: payload.company ?? '',
+        email: payload.email ?? '',
+        phone: payload.phone ?? '',
+        phoneAlt: payload.phone_alt ?? '',
+        vatNumber: payload.vat_number ?? '',
+        address: payload.address ?? '',
+        city: payload.city ?? '',
+        updatedAt: now,
+      };
+      setCustomers((list) =>
+        list.map((c) => (c.id === editing.id ? optimistic : c))
+      );
+      showSuccess(tr.toastUpdated(optimistic.name));
+
+      runInBackground(
+        () => customerService.updateCustomer(editing.id, payload),
+        (row) =>
+          setCustomers((list) =>
+            list.map((c) => (c.id === row.id ? mapCustomer(row as DbCustomer) : c))
+          ),
+        (err) => {
+          // rollback only this row
+          setCustomers((list) =>
+            list.map((c) => (c.id === previous.id ? previous : c))
+          );
+          reportError(tr.errSaveCustomer, err);
+        }
+      );
+    } else {
+      const id = crypto.randomUUID();
+      const optimistic: Customer = {
+        id,
+        name: payload.name,
+        company: payload.company ?? '',
+        email: payload.email ?? '',
+        phone: payload.phone ?? '',
+        phoneAlt: payload.phone_alt ?? '',
+        vatNumber: payload.vat_number ?? '',
+        address: payload.address ?? '',
+        city: payload.city ?? '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      setCustomers((list) => [optimistic, ...list]);
+      showSuccess(tr.toastCreated(optimistic.name));
+
+      runInBackground(
+        () => customerService.createCustomer({ ...payload, id }),
+        (row) =>
+          setCustomers((list) =>
+            list.map((c) => (c.id === row.id ? mapCustomer(row as DbCustomer) : c))
+          ),
+        (err) => {
+          // rollback: remove the optimistic row
+          setCustomers((list) => list.filter((c) => c.id !== id));
+          reportError(tr.errSaveCustomer, err);
+        }
+      );
+    }
   };
 
   const handleEdit = (c: Customer): void => {
@@ -1639,24 +1769,28 @@ export default function CustomersPage(): React.JSX.Element {
     setShowForm(true);
   };
 
-  const handleDelete = async (c: Customer): Promise<void> => {
+  const handleDelete = (c: Customer): void => {
     const count = documentCountByCustomer.get(c.id) ?? 0;
     if (count > 0) {
       showError(tr.errHasDocuments(c.name, count));
       setDeleteTarget(null);
       return;
     }
-    try {
-      await customerService.deleteCustomer(c.id);
-    } catch (err) {
-      setDeleteTarget(null);
-      reportError(tr.errDeleteCustomer, err); // console + popup
-      return;
-    }
-    if (revenueCustomerId === c.id) setRevenueCustomerId('');
-    await refresh(true);
+
     setDeleteTarget(null);
+    if (revenueCustomerId === c.id) setRevenueCustomerId(ALL_CUSTOMERS);
+    setCustomers((list) => list.filter((x) => x.id !== c.id));
     showSuccess(tr.toastDeleted(c.name));
+
+    runInBackground(
+      () => customerService.deleteCustomer(c.id),
+      () => undefined,
+      (err) => {
+        // rollback: put the row back
+        setCustomers((list) => [c, ...list.filter((x) => x.id !== c.id)]);
+        reportError(tr.errDeleteCustomer, err);
+      }
+    );
   };
 
   return (
@@ -1779,7 +1913,10 @@ export default function CustomersPage(): React.JSX.Element {
           {/* Customer selector */}
           <select
             value={revenueCustomerId}
-            onChange={(e) => setRevenueCustomerId(e.target.value)}
+            onChange={(e) => {
+              setRevenueCustomerId(e.target.value);
+              setPage(1);
+            }}
             className="w-full h-8 px-2 rounded-full border-2 text-[11px] cursor-pointer focus:outline-none transition-all mb-1.5"
             style={{
               background: THEME.warmIvory,
@@ -1787,7 +1924,7 @@ export default function CustomersPage(): React.JSX.Element {
               color: THEME.charcoal,
             }}
           >
-            <option value="">{tr.selectCustomerPrompt}</option>
+            <option value={ALL_CUSTOMERS}>{tr.allCustomers}</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -1968,13 +2105,7 @@ export default function CustomersPage(): React.JSX.Element {
           </h2>
         </div>
 
-        {loading ? (
-          <div className="py-12 text-center">
-            <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
-              {tr.loading}
-            </p>
-          </div>
-        ) : paginated.length > 0 ? (
+        {paginated.length > 0 ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1996,6 +2127,12 @@ export default function CustomersPage(): React.JSX.Element {
                       style={{ color: THEME.mutedOlive }}
                     >
                       {tr.colCompany}
+                    </th>
+                    <th
+                      className="text-right text-[9px] font-bold uppercase tracking-wider px-3 py-2 hidden lg:table-cell"
+                      style={{ color: THEME.mutedOlive }}
+                    >
+                      {tr.colRevenue}
                     </th>
                     <th
                       className="text-left text-[9px] font-bold uppercase tracking-wider px-3 py-2"
@@ -2060,23 +2197,22 @@ export default function CustomersPage(): React.JSX.Element {
                           {c.company || '—'}
                         </p>
                       </td>
+                      <td className="px-3 py-2 text-right hidden lg:table-cell">
+                        <p
+                          className="text-[11px] font-semibold"
+                          style={{ color: THEME.deepForest }}
+                        >
+                          {formatMoney(revenueByCustomer.get(c.id) ?? 0)}
+                        </p>
+                      </td>
                       <td className="px-3 py-2">
                         <p
                           className="text-[11px] font-mono"
                           style={{ color: THEME.mutedOlive }}
                           dir="ltr"
                         >
-                          {c.phone || c.phoneAlt}
+                          {c.phone || c.phoneAlt || '—'}
                         </p>
-                        {c.phone && c.phoneAlt && (
-                          <p
-                            className="text-[11px] font-mono"
-                            style={{ color: THEME.mutedOlive }}
-                            dir="ltr"
-                          >
-                            {c.phoneAlt}
-                          </p>
-                        )}
                       </td>
                       <td className="px-3 py-2 hidden lg:table-cell">
                         <p
@@ -2172,7 +2308,7 @@ export default function CustomersPage(): React.JSX.Element {
               tr={tr}
             />
           </>
-        ) : (
+        ) : hydrated ? (
           <div className="py-12 text-center">
             <p className="text-[13px]" style={{ color: THEME.mutedOlive }}>
               {tr.noCustomers}
@@ -2188,6 +2324,10 @@ export default function CustomersPage(): React.JSX.Element {
               {tr.addFirstCustomer}
             </button>
           </div>
+        ) : (
+          // First local read hasn't finished yet (a few ms) — render an empty
+          // block of the same height, NOT a spinner / loading text.
+          <div className="py-12" />
         )}
       </div>
 
@@ -2201,8 +2341,7 @@ export default function CustomersPage(): React.JSX.Element {
             setShowForm(false);
             setEditingCustomer(null);
           }}
-          onSaved={handleSaved}
-          onError={reportError}
+          onSubmit={handleSubmitCustomer}
         />
       )}
 
@@ -2223,7 +2362,7 @@ export default function CustomersPage(): React.JSX.Element {
           confirmLabel={tr.deleteConfirm}
           cancelLabel={tr.cancel}
           danger
-          onConfirm={() => void handleDelete(deleteTarget)}
+          onConfirm={() => handleDelete(deleteTarget)}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
